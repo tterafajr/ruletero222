@@ -887,7 +887,7 @@ function rUsers() {
   var h = '<div class="uo"><div class="dh"><h2>\u{1F465} Gestión de Usuarios</h2><div style="display:flex;align-items:center;gap:16px;"><button class="btn bg bs" onclick="openAddU()">\u2795 Nuevo Usuario</button><button class="hbn" onclick="togUsers()">\u2715 Cerrar</button></div></div><div class="dc"><table class="ut"><thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>';
   for (var i = 0; i < S.users.length; i++) {
     var u = S.users[i];
-    h += '<tr><td>' + escH(u.name) + '</td><td>' + escH(u.username) + '</td><td><span class="rb ' + _roleBadgeCls(u.role) + '">' + _roleIcon(u.role) + ' ' + _roleLabel(u.role) + '</span></td><td class="' + (u.active ? "sa" : "si2") + '">' + (u.active ? "\u2705 Activo" : "\u274C Inactivo") + '</td><td><button class="btn bo bs" onclick="openEditU(\'' + u.id + '\')">\u270F\uFE0F</button> ' + (u.username !== "admin" ? '<button class="btn bd bs" onclick="togAct(\'' + u.id + '\',' + !u.active + ')">' + (u.active ? "Desactivar" : "Activar") + '</button> <button class="btn bd bs" onclick="delU(\'' + u.id + '\')">\u{1F5D1}</button>' : "") + '</td></tr>';
+    h += '<tr><td>' + escH(u.name) + '</td><td>' + escH(u.username) + '</td><td><span class="rb ' + _roleBadgeCls(u.role) + '">' + _roleIcon(u.role) + ' ' + _roleLabel(u.role) + '</span></td><td class="' + (u.active ? "sa" : "si2") + '">' + (u.active ? "\u2705 Activo" : "\u274C Inactivo") + '</td><td><button class="btn bo bs" onclick="openEditU(\'' + u.id + '\')">\u270F\uFE0F</button> <button class="btn bw bs" onclick="openResetPwU(\'' + u.id + '\')">\u{1F511}</button> ' + (u.username !== "admin" ? '<button class="btn bd bs" onclick="togAct(\'' + u.id + '\',' + !u.active + ')">' + (u.active ? "Desactivar" : "Activar") + '</button> <button class="btn bd bs" onclick="delU(\'' + u.id + '\')">\u{1F5D1}</button>' : "") + '</td></tr>';
   }
   h += '</tbody></table></div></div>';
   return h;
@@ -1074,6 +1074,7 @@ function renderApp() {
     '<button class="hbn" onclick="togDash()">\u{1F4CA} <span>Dashboard</span></button>' +
     (ad ? '<button class="hbn gold" onclick="togUsers()">\u{1F465} <span>Usuarios</span></button><button class="hbn" onclick="togSettings()">\u2699\uFE0F <span>Config</span></button>' : '') +
     '<div class="ui"><div class="uv ' + _roleUVCls(S.user.role) + '">' + _roleIcon(S.user.role) + '</div><div><div style="font-size:12px;font-weight:600">' + escH(S.user.name) + '</div><div style="font-size:10px;color:rgba(255,255,255,.5)">' + _roleLabel(S.user.role) + '</div></div></div>' +
+    '<button class="hbn" onclick="openChangeMyPw()">\u{1F511} <span>Contraseña</span></button>' +
     '<button class="hbn" onclick="doLogout()">\u{1F6AA} <span>Salir</span></button></div></div><div class="hgl"></div></header>' +
     '<main class="mn">' +
     (canAdd ? '<button class="btn bg" onclick="openAdd()" style="margin-bottom:16px;">\u2795 Agregar Post</button>' : '<div class="vn">\u{1F441} Modo visualizador — Solo puedes ver el contenido.</div>') +
@@ -1085,6 +1086,111 @@ function renderApp() {
     '<footer class="ft"><div class="fgl"></div><div class="fi2"><div class="fb">' + logoHTML("fl2", "sm") + '<span style="font-size:13px;font-weight:700;">RULETERO 222</span><span style="color:var(--g);font-size:11px;">|</span><span style="font-size:11px;color:rgba(255,255,255,.6);">La Ruta de los Poblanos</span></div><div class="fc">\u00a9 ' + new Date().getFullYear() + ' Gestor de Posts</div></div></footer>';
 
   if (!S.loading) renderPosts();
+}
+
+// ============ CHANGE MY PASSWORD ============
+function openChangeMyPw() {
+  var d = document.createElement("div"); d.id = "chPwM"; d.className = "mo";
+  d.innerHTML = '<div class="md"><div class="mh"><h3>\u{1F511} Cambiar Mi Contraseña</h3><button class="mc" onclick="clM(\'chPwM\')">\u2715</button></div>' +
+    '<div class="mb">' +
+    '<div class="fg"><label class="fl">Contraseña actual</label><div class="pw"><input type="password" id="cpCur" class="fi" placeholder="Tu contraseña actual"><button type="button" class="pt" onclick="togglePw(\'cpCur\',this)">\u{1F441}</button></div></div>' +
+    '<div class="fg"><label class="fl">Nueva contraseña</label><div class="pw"><input type="password" id="cpNew" class="fi" placeholder="Mínimo 6 caracteres"><button type="button" class="pt" onclick="togglePw(\'cpNew\',this)">\u{1F441}</button></div></div>' +
+    '<div class="fg"><label class="fl">Confirmar nueva contraseña</label><div class="pw"><input type="password" id="cpConf" class="fi" placeholder="Repite la nueva contraseña"><button type="button" class="pt" onclick="togglePw(\'cpConf\',this)">\u{1F441}</button></div></div>' +
+    '</div><div class="mf"><button class="btn bo" onclick="clM(\'chPwM\')">Cancelar</button><button class="btn bp" id="cpBtn" onclick="doChangeMyPw()" style="width:auto">\u{1F4BE} Cambiar</button></div></div>';
+  document.body.appendChild(d); setTimeout(function () { d.classList.add("ac"); }, 50);
+}
+
+async function doChangeMyPw() {
+  var cur = document.getElementById("cpCur").value,
+    nw = document.getElementById("cpNew").value,
+    conf = document.getElementById("cpConf").value,
+    b = document.getElementById("cpBtn");
+
+  if (!cur || !nw || !conf) { toast("Completa todos los campos", "error"); return; }
+  if (nw.length < 6) { toast("La nueva contraseña debe tener mínimo 6 caracteres", "error"); return; }
+  if (nw !== conf) { toast("Las contraseñas nuevas no coinciden", "error"); return; }
+  if (cur === nw) { toast("La nueva contraseña debe ser diferente", "error"); return; }
+
+  b.disabled = true; b.textContent = "Cambiando...";
+
+  try {
+    var user = auth.currentUser;
+    if (!user) { toast("No hay sesión activa", "error"); b.disabled = false; b.textContent = "\u{1F4BE} Cambiar"; return; }
+
+    // Re-autenticar al usuario con su contraseña actual
+    var credential = firebase.auth.EmailAuthProvider.credential(user.email, cur);
+    await user.reauthenticateWithCredential(credential);
+
+    // Cambiar la contraseña
+    await user.updatePassword(nw);
+
+    toast("\u2705 Contraseña cambiada correctamente", "success");
+    clM("chPwM");
+  } catch (e) {
+    var msg = "Error al cambiar la contraseña";
+    if (e.code === "auth/wrong-password" || e.code === "auth/invalid-credential") msg = "La contraseña actual es incorrecta";
+    else if (e.code === "auth/too-many-requests") msg = "Demasiados intentos. Espera un momento";
+    else if (e.code === "auth/requires-recent-login") msg = "Tu sesión expiró. Cierra sesión e inicia de nuevo";
+    else if (e.message) msg = e.message;
+    toast(msg, "error");
+    b.disabled = false; b.textContent = "\u{1F4BE} Cambiar";
+  }
+}
+
+// ============ RESET PASSWORD (ADMIN) ============
+function openResetPwU(uid) {
+  var u = S.users.find(function (x) { return x.id === uid; }); if (!u) return;
+  var d = document.createElement("div"); d.id = "resetPwM"; d.className = "mo";
+  d.innerHTML = '<div class="md"><div class="mh"><h3>\u{1F511} Restablecer Contraseña</h3><button class="mc" onclick="clM(\'resetPwM\')">\u2715</button></div>' +
+    '<div class="mb">' +
+    '<p style="font-size:14px;color:var(--t);margin-bottom:16px;">Restablecer contraseña de <strong>' + escH(u.name) + '</strong> (<code>' + escH(u.username) + '</code>)</p>' +
+    '<div class="fg"><label class="fl">Nueva contraseña</label><div class="pw"><input type="password" id="rpNew" class="fi" placeholder="Mínimo 6 caracteres"><button type="button" class="pt" onclick="togglePw(\'rpNew\',this)">\u{1F441}</button></div></div>' +
+    '<div class="fg"><label class="fl">Confirmar nueva contraseña</label><div class="pw"><input type="password" id="rpConf" class="fi" placeholder="Repite la nueva contraseña"><button type="button" class="pt" onclick="togglePw(\'rpConf\',this)">\u{1F441}</button></div></div>' +
+    '<div style="margin-top:12px;padding:12px;background:#fef3c7;border:1px solid #fde68a;border-radius:8px;font-size:12px;color:#92400e;line-height:1.5;"><strong>\u{1F4A1} Nota:</strong> Al cambiar la contraseña, el usuario deberá iniciar sesión nuevamente con su nueva contraseña.</div>' +
+    '</div><div class="mf"><button class="btn bo" onclick="clM(\'resetPwM\')">Cancelar</button><button class="btn bp" id="rpBtn" onclick="doResetPwU(\'' + uid + '\')" style="width:auto">\u{1F4BE} Restablecer</button></div></div>';
+  document.body.appendChild(d); setTimeout(function () { d.classList.add("ac"); }, 50);
+}
+
+async function doResetPwU(uid) {
+  var nw = document.getElementById("rpNew").value,
+    conf = document.getElementById("rpConf").value,
+    b = document.getElementById("rpBtn");
+
+  if (!nw || !conf) { toast("Completa todos los campos", "error"); return; }
+  if (nw.length < 6) { toast("La nueva contraseña debe tener mínimo 6 caracteres", "error"); return; }
+  if (nw !== conf) { toast("Las contraseñas no coinciden", "error"); return; }
+
+  b.disabled = true; b.textContent = "Cambiando...";
+
+  try {
+    var userData = S.users.find(function (x) { return x.id === uid; });
+    if (!userData) { toast("Usuario no encontrado", "error"); b.disabled = false; b.textContent = "\u{1F4BE} Restablecer"; return; }
+
+    // No se puede cambiar la contraseña de otro usuario desde el cliente sin Admin SDK.
+    // Mostramos instrucciones claras para hacerlo desde Firebase Console.
+    clM("resetPwM");
+
+    // Mostrar guía paso a paso
+    var guide = document.createElement("div"); guide.id = "resetGuide"; guide.className = "mo";
+    guide.innerHTML = '<div class="md"><div class="mh"><h3>\u{1F511} Cómo cambiar la contraseña</h3><button class="mc" onclick="clM(\'resetGuide\')">\u2715</button></div>' +
+      '<div class="mb">' +
+      '<p style="font-size:14px;margin-bottom:16px;">Para cambiar la contraseña de <strong>' + escH(userData.name) + '</strong>, sigue estos pasos:</p>' +
+      '<div style="background:#f1f5f9;border-radius:10px;padding:16px;margin-bottom:16px;">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;"><span style="background:var(--n);color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;">1</span><span style="font-size:13px;">Abre <a href="https://console.firebase.google.com/" target="_blank" style="color:var(--n);font-weight:600;">Firebase Console</a></span></div>' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;"><span style="background:var(--n);color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;">2</span><span style="font-size:13px;">Ve a <strong>Authentication</strong> \u2192 <strong>Users</strong></span></div>' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;"><span style="background:var(--n);color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;">3</span><span style="font-size:13px;">Busca el usuario <code style="background:#e2e8f0;padding:2px 6px;border-radius:4px;">' + escH(userData.username) + '@ruletero222.app</code></span></div>' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;"><span style="background:var(--n);color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;">4</span><span style="font-size:13px;">Haz clic en los <strong>tres puntos</strong> \u22EE \u2192 <strong>Cambiar contraseña</strong></span></div>' +
+      '<div style="display:flex;align-items:center;gap:10px;"><span style="background:var(--g);color:var(--n);width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;">5</span><span style="font-size:13px;">Escribe la nueva contraseña y guarda</span></div>' +
+      '</div>' +
+      '<div style="padding:12px;background:#dcfce7;border:1px solid #86efac;border-radius:8px;font-size:12px;color:#166534;"><strong>\u2705 Hecho:</strong> El usuario podrá iniciar sesión con la nueva contraseña inmediatamente.</div>' +
+      '</div><div class="mf"><button class="btn bp" onclick="clM(\'resetGuide\')" style="width:auto">Entendido</button></div></div>';
+    document.body.appendChild(guide); setTimeout(function () { guide.classList.add("ac"); }, 50);
+    b.disabled = false; b.textContent = "\u{1F4BE} Restablecer";
+
+  } catch (e) {
+    toast("Error: " + e.message, "error");
+    b.disabled = false; b.textContent = "\u{1F4BE} Restablecer";
+  }
 }
 
 // ============ UTILS ============
