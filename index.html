@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RULETERO 222 - Gestor de Posts</title>
+  <meta name="description" content="Gestor de Posts de Facebook - La Ruta de los Poblanos">
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎰</text></svg>">
+</head>
+<body>
+  <!-- Toast container -->
+  <div class="tc2" id="toastC"></div>
+
+  <!-- App container -->
+  <div id="app">
+    <div class="lss">
+      <div class="sp"></div>
+    </div>
+  </div>
+
+  <!-- Firebase SDK (compat version) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+
+  <!-- Firebase configuration (EDITA ESTE ARCHIVO con tus datos) -->
+  <script src="js/firebase-config.js"></script>
+
+  <!-- Application logic -->
+  <script src="js/app.js"></script>
+
+  <!-- Initialize app -->
+  <script>
+    // Esperar a que Firebase esté listo
+    document.addEventListener('DOMContentLoaded', function() {
+      // Pequeño delay para asegurar que Firebase está inicializado
+      setTimeout(function() {
+        if (typeof init === 'function') {
+          init();
+        } else {
+          document.getElementById('app').innerHTML = 
+            '<div class="lc"><div class="lk" style="text-align:center;">' +
+            '<h1 class="lt" style="color:#ef4444;">Error de Configuración</h1>' +
+            '<p style="color:#64748b;margin:16px 0;">No se pudo cargar Firebase. Verifica que <code>js/firebase-config.js</code> tenga tus credenciales correctas.</p>' +
+            '<p style="color:#94a3b8;font-size:12px;">Consulta el archivo SETUP.md para instrucciones.</p>' +
+            '</div></div>';
+        }
+      }, 500);
+    });
+  </script>
+</body>
+</html>
