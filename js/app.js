@@ -4,7 +4,7 @@
  * 
  * Migrado de Google Apps Script a Firebase Firestore + Auth
  * 
- * v7.0 — Agregado: Firebase Storage, Realtime, Auditoría, CSV, Modo Oscuro
+ * v8.0 — Logo fijo, Dark Mode fix, sin upload de logo
  */
 
 // ============ ESTADO GLOBAL ============
@@ -40,15 +40,12 @@ var S = {
 
 // ============ CONSTANTES ============
 var POSTS_PER_PAGE = 12;
+var LOGO_URL = "data:image/jpeg;base64,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";
 
 // ============ HELPERS ============
 function logoHTML(cls, size) {
-  if (S.logoUrl) {
-    var bg = S.darkMode ? '#1e293b' : '#fff';
-    return '<div class="' + cls + '" style="background:' + bg + ';display:flex;align-items:center;justify-content:center;"><img src="' + escH(S.logoUrl) + '" alt="RULETERO 222"></div>';
-  }
-  var fs = size === "lg" ? "32px" : size === "md" ? "16px" : "12px";
-  return '<div class="' + cls + '" style="font-size:' + fs + '">R</div>';
+  var bg = S.darkMode ? '#1e293b' : '#fff';
+  return '<div class="' + cls + '" style="background:' + bg + ';display:flex;align-items:center;justify-content:center;"><img src="' + LOGO_URL + '" alt="RULETERO 222" style="object-fit:contain;max-width:100%;max-height:100%;"></div>';
 }
 
 function escH(s) {
@@ -301,8 +298,8 @@ async function _uploadImageToStorage(file, postId) {
 function clearS() {
   localStorage.removeItem("rt_tk");
   localStorage.removeItem("rt_u");
-  localStorage.removeItem("rt_lu");
-  S.user = null; S.token = null; S.logoUrl = "";
+  S.user = null; S.token = null;
+  S.logoUrl = LOGO_URL;
   _stopPostsListener();
 }
 
@@ -431,11 +428,8 @@ async function doLogin() {
 
 async function _loadInitialData() {
   try {
-    var cfgDoc = await db.collection("config").doc("app").get();
-    if (cfgDoc.exists && cfgDoc.data().logoUrl) {
-      S.logoUrl = cfgDoc.data().logoUrl;
-      localStorage.setItem("rt_lu", S.logoUrl);
-    }
+    S.logoUrl = LOGO_URL;
+    localStorage.setItem("rt_lu", LOGO_URL);
     _startPostsListener();
     S.loading = false;
   } catch (e) {
@@ -458,10 +452,8 @@ function doLogout() {
 // ============ SESSION RECOVERY ============
 function init() {
   _initDarkMode();
-  var lu = localStorage.getItem("rt_lu");
-  if (lu) S.logoUrl = lu;
-
-  _fetchLogo();
+  S.logoUrl = LOGO_URL;
+  localStorage.setItem("rt_lu", LOGO_URL);
 
   auth.onAuthStateChanged(function (firebaseUser) {
     if (firebaseUser) {
@@ -518,19 +510,7 @@ function forceShowLogin() {
   renderLogin();
 }
 
-async function _fetchLogo() {
-  try {
-    var cfgDoc = await db.collection("config").doc("app").get();
-    if (cfgDoc.exists && cfgDoc.data().logoUrl) {
-      S.logoUrl = cfgDoc.data().logoUrl;
-      localStorage.setItem("rt_lu", S.logoUrl);
-      var loginLogo = document.querySelector(".lo");
-      if (loginLogo && document.getElementById("lUser")) {
-        loginLogo.innerHTML = '<img src="' + escH(S.logoUrl) + '" alt="RULETERO 222">';
-      }
-    }
-  } catch (e) { /* silencioso */ }
-}
+
 
 // ============ POSTS - REALTIME LISTENER ============
 function _startPostsListener() {
@@ -1071,7 +1051,8 @@ function rUsers() {
   var h = '<div class="uo"><div class="dh"><h2>👥 Gestión de Usuarios</h2><div style="display:flex;align-items:center;gap:16px;"><button class="btn bg bs" onclick="openAddU()">➕ Nuevo Usuario</button><button class="hbn" onclick="togUsers()">✕ Cerrar</button></div></div><div class="dc"><table class="ut"><thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>';
   for (var i = 0; i < S.users.length; i++) {
     var u = S.users[i];
-    h += '<tr><td>' + escH(u.name) + '</td><td>' + escH(u.email) + '</td><td><span class="rb ' + _roleBadgeCls(u.role) + '">' + _roleIcon(u.role) + ' ' + _roleLabel(u.role) + '</span></td><td class="' + (u.active ? "sa" : "si2") + '">' + (u.active ? "✅ Activo" : "❌ Inactivo") + '</td><td><button class="btn bo bs" onclick="openEditU(\'' + u.id + '\')">✏️</button> <button class="btn bw bs" onclick="sendResetEmail(\'' + u.id + '\')" title="Enviar email de reseteo de contraseña">📨</button> ' + (u.role !== "admin" || S.users.filter(function (x) { return x.role === "admin"; }).length > 1 ? '<button class="btn bd bs" onclick="togAct(\'' + u.id + '\',' + !u.active + ')">' + (u.active ? "Desactivar" : "Activar") + '</button> <button class="btn bd bs" onclick="delU(\'' + u.id + '\')">🗑</button>' : "") + '</td></tr>';
+    var roleBadgeStyle = u.role === "admin" ? "background:#1e3a5f;color:#93c5fd;" : u.role === "gestionador" ? "background:#3b3410;color:#fcd34d;" : "background:#1e293b;color:#94a3b8;";
+    h += '<tr><td style="color:var(--n)">' + escH(u.name) + '</td><td style="color:var(--n)">' + escH(u.email) + '</td><td><span class="rb ' + _roleBadgeCls(u.role) + '" style="' + roleBadgeStyle + '">' + _roleIcon(u.role) + ' ' + _roleLabel(u.role) + '</span></td><td class="' + (u.active ? "sa" : "si2") + '">' + (u.active ? "✅ Activo" : "❌ Inactivo") + '</td><td><button class="btn bo bs" onclick="openEditU(\'' + u.id + '\')">✏️</button> <button class="btn bw bs" onclick="sendResetEmail(\'' + u.id + '\')" title="Enviar email de reseteo de contraseña">📨</button> ' + (u.role !== "admin" || S.users.filter(function (x) { return x.role === "admin"; }).length > 1 ? '<button class="btn bd bs" onclick="togAct(\'' + u.id + '\',' + !u.active + ')">' + (u.active ? "Desactivar" : "Activar") + '</button> <button class="btn bd bs" onclick="delU(\'' + u.id + '\')">🗑</button>' : "") + '</td></tr>';
   }
   h += '</tbody></table></div></div>';
   return h;
@@ -1194,27 +1175,21 @@ async function loadSettings() {
 }
 
 function rSettings() {
-  var curLogo = S.logoUrl || (S.settingsData && S.settingsData.logoUrl) || "";
   var h = '<div class="so"><div class="dh"><h2>⚙️ Configuración</h2><button class="hbn" onclick="togSettings()">✕ Cerrar</button></div><div class="sc">';
 
-  h += '<div class="slg"><h4>🎨 Logo de la Aplicación</h4><p>Sube una imagen desde tu dispositivo o pega una URL. Se recomienda PNG cuadrado con fondo transparente.</p>';
-  h += '<div class="sprv"><div>' + (curLogo ? '<div class="lo" style="background:#fff;display:flex;align-items:center;justify-content:center;"><img src="' + escH(curLogo) + '" alt="Logo"></div>' : logoHTML("lo", "lg")) + '</div><div>' + (curLogo ? '<div class="hl" style="background:#fff;display:flex;align-items:center;justify-content:center;"><img src="' + escH(curLogo) + '" alt="Logo"></div>' : logoHTML("hl", "md")) + '</div><div>' + (curLogo ? '<div class="fl2" style="background:#fff;display:flex;align-items:center;justify-content:center;"><img src="' + escH(curLogo) + '" alt="Logo"></div>' : logoHTML("fl2", "sm")) + '</div><div><div class="sprv-label">Vista previa: Login | Header | Footer</div></div></div>';
-  h += '<div class="fg"><label class="fl">📁 Subir logo desde tu dispositivo</label><div class="iupload" onclick="document.getElementById(\'logoFile\').click()"><input type="file" id="logoFile" accept="image/*" onchange="uploadLogo(this)" style="display:none"><div class="iupload-icon">🖼️</div><div class="iupload-text">Haz clic para subir tu logo</div><div class="iupload-hint">PNG, JPG, WEBP — Máximo 5 MB</div><div id="logoProgress" class="iupload-progress" style="display:none"><div id="logoBar" class="iupload-progress-bar" style="width:0%"></div></div></div></div>';
-  h += '<div style="text-align:center;color:var(--m);font-size:12px;margin:12px 0;">— o pega una URL manualmente —</div>';
-  h += '<div class="fg"><label class="fl">URL del Logo</label><input type="url" id="sLogoUrl" class="fi" value="' + escH(curLogo) + '" placeholder="https://ejemplo.com/mi-logo.png"></div>';
-  h += '<div style="display:flex;gap:10px;"><button class="btn bp" onclick="saveLogo()" style="width:auto;flex:1">💾 Guardar URL</button>' + (curLogo ? '<button class="btn bd" onclick="removeLogo()" style="width:auto">🗑 Quitar Logo</button>' : '') + '</div>';
+  h += '<div class="slg"><h4>🎨 Logo de la Aplicación</h4><p>El logo está configurado y se muestra en el login, encabezado y pie de página.</p>';
+  h += '<div class="sprv"><div><div class="lo" style="background:#fff;display:flex;align-items:center;justify-content:center;"><img src="' + LOGO_URL + '" alt="Logo"></div></div><div><div class="hl" style="background:#fff;display:flex;align-items:center;justify-content:center;"><img src="' + LOGO_URL + '" alt="Logo"></div></div><div><div class="fl2" style="background:#fff;display:flex;align-items:center;justify-content:center;"><img src="' + LOGO_URL + '" alt="Logo"></div></div><div><div class="sprv-label">Vista previa: Login | Header | Footer</div></div></div>';
   h += '</div>';
 
   h += '<div class="slg"><h4>📋 Información del Sistema</h4><div style="font-size:13px;color:var(--m);line-height:1.8;">';
   h += '<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--bd);padding:6px 0;"><span>Aplicación</span><strong style="color:var(--n)">RULETERO 222</strong></div>';
   h += '<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--bd);padding:6px 0;"><span>Plataforma</span><strong style="color:var(--n)">GitHub Pages + Firebase</strong></div>';
-  h += '<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--bd);padding:6px 0;"><span>Versión</span><strong style="color:var(--n)">7.0</strong></div>';
+  h += '<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--bd);padding:6px 0;"><span>Versión</span><strong style="color:var(--n)">8.0</strong></div>';
   h += '<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--bd);padding:6px 0;"><span>Modo oscuro</span><strong style="color:' + (S.darkMode ? "#22c55e" : "#ef4444") + '">' + (S.darkMode ? "Activado" : "Desactivado") + '</strong></div>';
   h += '<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--bd);padding:6px 0;"><span>Tiempo real</span><strong style="color:#22c55e;">Activado</strong></div>';
-  h += '<div style="display:flex;justify-content:space-between;padding:6px 0;"><span>Estado del Logo</span><strong style="color:' + (curLogo ? "#22c55e" : "#ef4444") + '">' + (curLogo ? "Configurado" : "Sin configurar (letra R)") + '</strong></div>';
+  h += '<div style="display:flex;justify-content:space-between;padding:6px 0;"><span>Logo</span><strong style="color:#22c55e;">Configurado</strong></div>';
   h += '</div></div>';
 
-  // Audit log section (admin only)
   if (S.user && S.user.role === "admin") {
     h += '<div class="slg"><h4>📜 Registro de Auditoría (últimas 20 acciones)</h4><div id="auditLogContainer"><div style="text-align:center;padding:20px;"><div class="sp" style="width:24px;height:24px;margin:0 auto 8px;"></div>Cargando...</div></div></div>';
   }
@@ -1251,97 +1226,7 @@ async function loadAuditLog() {
   }
 }
 
-async function saveLogo() {
-  var url = document.getElementById("sLogoUrl").value.trim();
-  try {
-    await db.collection("config").doc("app").set({ logoUrl: url }, { merge: true });
-    S.logoUrl = url;
-    if (S.settingsData) S.settingsData.logoUrl = url;
-    localStorage.setItem("rt_lu", url);
-    _audit("update_settings", "Logo actualizado via URL");
-    toast("✅ Logo guardado correctamente", "success");
-    renderApp();
-    setTimeout(loadAuditLog, 100);
-  } catch (e) { toast("Error: " + e.message, "error"); }
-}
 
-async function uploadLogo(input) {
-  var file = input.files[0];
-  if (!file) return;
-  if (file.size > 5 * 1024 * 1024) { toast("La imagen no debe superar 5 MB", "error"); return; }
-  if (!file.type.startsWith("image/")) { toast("Solo se permiten imágenes", "error"); return; }
-
-  toast("Procesando logo...", "info");
-
-  try {
-    var url = null;
-
-    // Método 1: Intentar Firebase Storage (preferido)
-    if (storage && storage.ref) {
-      try {
-        toast("Subiendo a Firebase Storage...", "info");
-        var ref = storage.ref("config/logo_" + Date.now() + "_" + file.name);
-        var uploadTask = ref.put(file);
-
-        url = await new Promise(function (resolve, reject) {
-          uploadTask.on("state_changed",
-            function (snapshot) {
-              var progress = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
-              toast("Subiendo... " + progress + "%", "info");
-            },
-            function (error) {
-              console.warn("Storage upload failed, using base64 fallback:", error.code || error.message);
-              reject(error);
-            },
-            function () {
-              uploadTask.snapshot.ref.getDownloadURL().then(resolve).catch(reject);
-            }
-          );
-        });
-      } catch (storageErr) {
-        console.warn("Storage no disponible, usando base64:", storageErr.code || storageErr.message);
-        url = null; // Continuar con método 2
-      }
-    }
-
-    // Método 2: Convertir a base64 y guardar en Firestore (fallback)
-    if (!url) {
-      toast("Guardando logo como base64...", "info");
-      url = await new Promise(function (resolve, reject) {
-        var reader = new FileReader();
-        reader.onload = function (e) { resolve(e.target.result); };
-        reader.onerror = function () { reject(new Error("No se pudo leer la imagen")); };
-        reader.readAsDataURL(file);
-      });
-    }
-
-    await db.collection("config").doc("app").set({ logoUrl: url }, { merge: true });
-    S.logoUrl = url;
-    if (S.settingsData) S.settingsData.logoUrl = url;
-    localStorage.setItem("rt_lu", url);
-    _audit("update_settings", "Logo subido desde archivo");
-    toast("✅ Logo subido correctamente", "success");
-    renderApp();
-    setTimeout(loadAuditLog, 100);
-  } catch (e) {
-    console.error("uploadLogo error:", e);
-    toast("❌ " + e.message, "error");
-  }
-}
-
-async function removeLogo() {
-  if (!confirm("¿Quitar el logo y volver a la letra R?")) return;
-  try {
-    await db.collection("config").doc("app").set({ logoUrl: "" }, { merge: true });
-    S.logoUrl = "";
-    if (S.settingsData) S.settingsData.logoUrl = "";
-    localStorage.setItem("rt_lu", "");
-    _audit("update_settings", "Logo eliminado");
-    toast("✅ Logo eliminado", "success");
-    renderApp();
-    setTimeout(loadAuditLog, 100);
-  } catch (e) { toast("Error: " + e.message, "error"); }
-}
 
 // ============ RENDER APP PRINCIPAL ============
 function renderApp() {
@@ -1367,7 +1252,7 @@ function renderApp() {
     '<button class="btn bo bs" onclick="exportCSV()" title="Exportar a CSV">📥 CSV</button>' +
     '<div class="vt"><button class="vb ' + (S.view === "grid" ? "ac" : "") + '" onclick="setV(\'grid\')">▦</button><button class="vb ' + (S.view === "list" ? "ac" : "") + '" onclick="setV(\'list\')">☰</button></div></div></div>' +
     '<div id="pC"></div><div id="pgC"></div></main>' +
-    '<footer class="ft"><div class="fgl"></div><div class="fi2"><div class="fb">' + logoHTML("fl2", "sm") + '<span style="font-size:13px;font-weight:700;">RULETERO 222</span><span style="color:var(--g);font-size:11px;">|</span><span style="font-size:11px;color:rgba(255,255,255,.6);">La Ruta de los Poblanos</span></div><div class="fc">© ' + new Date().getFullYear() + ' Gestor de Posts v7.0</div></div></footer>';
+    '<footer class="ft"><div class="fgl"></div><div class="fi2"><div class="fb">' + logoHTML("fl2", "sm") + '<span style="font-size:13px;font-weight:700;">RULETERO 222</span><span style="color:var(--g);font-size:11px;">|</span><span style="font-size:11px;color:rgba(255,255,255,.6);">La Ruta de los Poblanos</span></div><div class="fc">© ' + new Date().getFullYear() + ' Gestor de Posts v8.0</div></div></footer>';
 
   if (!S.loading) renderPosts();
   if (S.showSettings && ad) setTimeout(loadAuditLog, 200);
