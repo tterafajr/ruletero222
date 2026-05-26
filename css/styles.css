@@ -177,7 +177,7 @@ input, select, textarea { font-family: inherit; }
   overflow: hidden;
   box-shadow: 0 4px 15px rgba(212,175,55,.3);
 }
-.lo img { width: 100%; height: 100%; object-fit: cover; }
+.lo img { width: calc(100% - 12px); height: calc(100% - 12px); object-fit: contain; border-radius: 50%; }
 .lt { text-align: center; font-size: 24px; font-weight: 800; color: var(--n); margin-bottom: 4px; }
 .ls { text-align: center; font-size: 13px; color: var(--g); margin-bottom: 30px; font-weight: 600; }
 
@@ -237,7 +237,7 @@ input, select, textarea { font-family: inherit; }
   background: linear-gradient(135deg, var(--gl), var(--g));
   flex-shrink: 0; overflow: hidden;
 }
-.hl img { width: 100%; height: 100%; object-fit: cover; }
+.hl img { width: calc(100% - 6px); height: calc(100% - 6px); object-fit: contain; border-radius: 50%; }
 .ht { font-size: 18px; font-weight: 800; letter-spacing: .5px; }
 .hs { font-size: 11px; color: var(--g); font-weight: 600; margin-top: -2px; }
 .ha { display: flex; align-items: center; gap: 8px; }
@@ -499,7 +499,7 @@ input, select, textarea { font-family: inherit; }
   font-size: 12px; font-weight: 900; color: var(--n);
   background: var(--g); overflow: hidden; flex-shrink: 0;
 }
-.fl2 img { width: 100%; height: 100%; object-fit: cover; }
+.fl2 img { width: calc(100% - 4px); height: calc(100% - 4px); object-fit: contain; border-radius: 50%; }
 .fc { font-size: 11px; color: rgba(255,255,255,.4); }
 
 /* ---- EMPTY STATE ---- */
