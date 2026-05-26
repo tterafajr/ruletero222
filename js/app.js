@@ -34,7 +34,7 @@ var S = {
 };
 
 // ============ CONSTANTES ============
-var EMAIL_SUFFIX = "@ruletero222.app";
+// Email real: los usuarios se registran con su correo electrónico real
 var POSTS_PER_PAGE = 12;
 
 // ============ HELPERS ============
@@ -76,8 +76,7 @@ function _roleBadgeCls(r) { return r === "admin" ? "ra" : r === "gestionador" ? 
 function _roleUVCls(r) { return r === "admin" ? "ad" : r === "gestionador" ? "gst" : "vi"; }
 
 // ============ FIRESTORE HELPERS ============
-function _usernameToEmail(u) { return u.toLowerCase().trim() + EMAIL_SUFFIX; }
-function _emailToUsername(e) { return e.replace(EMAIL_SUFFIX, ""); }
+// Helpers de email eliminados - ahora se usan emails reales directamente
 
 function _classify(text, title) {
   var c = ((text || "") + " " + (title || "")).toLowerCase();
@@ -193,7 +192,7 @@ function renderLogin() {
   a.innerHTML = '<div class="lc"><div class="lk">' + logoHTML("lo", "lg") +
     '<h1 class="lt">RULETERO 222</h1><p class="ls">La Ruta de los Poblanos</p>' +
     '<div id="lErr" class="lerr"></div>' +
-    '<div class="fg"><label class="fl">Usuario</label><input type="text" id="lUser" class="fi" placeholder="Ingresa tu usuario" autocomplete="username"></div>' +
+    '<div class="fg"><label class="fl">Correo electrónico</label><input type="email" id="lUser" class="fi" placeholder="tu@correo.com" autocomplete="email"></div>' +
     '<div class="fg"><label class="fl">Contraseña</label><div class="pw"><input type="password" id="lPass" class="fi" placeholder="Ingresa tu contraseña" autocomplete="current-password"><button type="button" class="pt" onclick="togglePw(\'lPass\',this)" title="Mostrar/ocultar">\u{1F441}</button></div></div>' +
     '<button class="btn bp" id="lBtn" onclick="doLogin()"><span id="lTxt">Iniciar Sesión</span></button>' +
     '<p style="text-align:center;font-size:11px;color:var(--m);margin-top:16px;">Acceso exclusivo para miembros del equipo</p>' +
@@ -215,7 +214,14 @@ async function doLogin() {
     txt = document.getElementById("lTxt");
 
   if (!u || !p) {
-    er.textContent = "Ingresa usuario y contraseña";
+    er.textContent = "Ingresa correo y contraseña";
+    er.className = "lerr show";
+    return;
+  }
+
+  // Validar que sea un email
+  if (u.indexOf("@") === -1) {
+    er.textContent = "Ingresa tu correo electrónico (ej: tu@correo.com)";
     er.className = "lerr show";
     return;
   }
@@ -236,12 +242,12 @@ async function doLogin() {
   }, 30000);
 
   try {
-    // Buscar usuario en Firestore primero para obtener el email
-    var userDoc = await db.collection("users").where("username", "==", u.toLowerCase()).limit(1).get();
+    // Buscar usuario en Firestore por email para verificar que existe y está activo
+    var userDoc = await db.collection("users").where("email", "==", u.toLowerCase()).limit(1).get();
 
     if (userDoc.empty) {
       if (S.loginTimeout) { clearTimeout(S.loginTimeout); S.loginTimeout = null; }
-      er.textContent = "Usuario no encontrado";
+      er.textContent = "Correo no registrado";
       er.className = "lerr show";
       b.disabled = false;
       txt.textContent = "Iniciar Sesión";
@@ -258,8 +264,8 @@ async function doLogin() {
       return;
     }
 
-    // Autenticar con Firebase Auth
-    var email = _usernameToEmail(u);
+    // Autenticar con Firebase Auth usando el email real
+    var email = u.toLowerCase();
     var cred = await auth.signInWithEmailAndPassword(email, p);
     var firebaseUser = cred.user;
 
@@ -267,7 +273,8 @@ async function doLogin() {
     S.user = {
       id: userDoc.id,
       uid: firebaseUser.uid,
-      username: userData.username,
+      email: userData.email,
+      username: userData.email,
       name: userData.name,
       role: userData.role
     };
@@ -366,7 +373,8 @@ async function _recoverSession(firebaseUser) {
           S.user = {
             id: userDoc.id,
             uid: firebaseUser.uid,
-            username: ud.username,
+            email: ud.email,
+            username: ud.email,
             name: ud.name,
             role: ud.role
           };
@@ -872,7 +880,7 @@ async function loadU() {
     S.users = [];
     snapshot.forEach(function (doc) {
       var d = doc.data();
-      S.users.push({ id: doc.id, username: d.username, name: d.name, role: d.role, active: d.active, createdAt: d.createdAt });
+      S.users.push({ id: doc.id, email: d.email, username: d.email, name: d.name, role: d.role, active: d.active, createdAt: d.createdAt });
     });
     renderApp();
   } catch (e) {
@@ -884,10 +892,10 @@ async function loadU() {
 
 function rUsers() {
   if (!S.users) return '<div class="uo"><div class="dh"><h2>\u{1F465} Gestión de Usuarios</h2><button class="hbn" onclick="togUsers()">\u2715 Cerrar</button></div><div class="dc" style="display:flex;justify-content:center;padding:60px;"><div class="sp" style="width:40px;height:40px;"></div></div></div>';
-  var h = '<div class="uo"><div class="dh"><h2>\u{1F465} Gestión de Usuarios</h2><div style="display:flex;align-items:center;gap:16px;"><button class="btn bg bs" onclick="openAddU()">\u2795 Nuevo Usuario</button><button class="hbn" onclick="togUsers()">\u2715 Cerrar</button></div></div><div class="dc"><table class="ut"><thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>';
+  var h = '<div class="uo"><div class="dh"><h2>\u{1F465} Gestión de Usuarios</h2><div style="display:flex;align-items:center;gap:16px;"><button class="btn bg bs" onclick="openAddU()">\u2795 Nuevo Usuario</button><button class="hbn" onclick="togUsers()">\u2715 Cerrar</button></div></div><div class="dc"><table class="ut"><thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>';
   for (var i = 0; i < S.users.length; i++) {
     var u = S.users[i];
-    h += '<tr><td>' + escH(u.name) + '</td><td>' + escH(u.username) + '</td><td><span class="rb ' + _roleBadgeCls(u.role) + '">' + _roleIcon(u.role) + ' ' + _roleLabel(u.role) + '</span></td><td class="' + (u.active ? "sa" : "si2") + '">' + (u.active ? "\u2705 Activo" : "\u274C Inactivo") + '</td><td><button class="btn bo bs" onclick="openEditU(\'' + u.id + '\')">\u270F\uFE0F</button> <button class="btn bw bs" onclick="openResetPwU(\'' + u.id + '\')">\u{1F511}</button> ' + (u.username !== "admin" ? '<button class="btn bd bs" onclick="togAct(\'' + u.id + '\',' + !u.active + ')">' + (u.active ? "Desactivar" : "Activar") + '</button> <button class="btn bd bs" onclick="delU(\'' + u.id + '\')">\u{1F5D1}</button>' : "") + '</td></tr>';
+    h += '<tr><td>' + escH(u.name) + '</td><td>' + escH(u.email) + '</td><td><span class="rb ' + _roleBadgeCls(u.role) + '">' + _roleIcon(u.role) + ' ' + _roleLabel(u.role) + '</span></td><td class="' + (u.active ? "sa" : "si2") + '">' + (u.active ? "\u2705 Activo" : "\u274C Inactivo") + '</td><td><button class="btn bo bs" onclick="openEditU(\'' + u.id + '\')">\u270F\uFE0F</button> <button class="btn bw bs" onclick="sendResetEmail(\'' + u.id + '\')" title="Enviar email de reseteo de contraseña">\u{1F4E7}</button> ' + (u.role !== "admin" || S.users.filter(function(x){return x.role==="admin";}).length > 1 ? '<button class="btn bd bs" onclick="togAct(\'' + u.id + '\',' + !u.active + ')">' + (u.active ? "Desactivar" : "Activar") + '</button> <button class="btn bd bs" onclick="delU(\'' + u.id + '\')">\u{1F5D1}</button>' : "") + '</td></tr>';
   }
   h += '</tbody></table></div></div>';
   return h;
@@ -898,37 +906,38 @@ function openAddU() {
   d.innerHTML = '<div class="md"><div class="mh"><h3>\u2795 Nuevo Usuario</h3><button class="mc" onclick="clM(\'addUM\')">\u2715</button></div>' +
     '<div class="mb">' +
     '<div class="fg"><label class="fl">Nombre completo</label><input type="text" id="nuName" class="fi" placeholder="Ej: Juan Pérez"></div>' +
-    '<div class="fg"><label class="fl">Usuario</label><input type="text" id="nuUser" class="fi" placeholder="Ej: juan.perez"></div>' +
+    '<div class="fg"><label class="fl">Correo electrónico</label><input type="email" id="nuEmail" class="fi" placeholder="Ej: juan@gmail.com"></div>' +
     '<div class="fg"><label class="fl">Contraseña</label><div class="pw"><input type="password" id="nuPass" class="fi" placeholder="Mínimo 6 caracteres"><button type="button" class="pt" onclick="togglePw(\'nuPass\',this)">\u{1F441}</button></div></div>' +
     '<div class="fg"><label class="fl">Rol</label><select id="nuRole" class="fi"><option value="viewer">\u{1F441} Visualizador</option><option value="gestionador">\u270F\uFE0F Gestionador</option><option value="admin">\u{1F6E1} Administrador</option></select></div>' +
+    '<div style="margin-top:8px;padding:10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:11px;color:#1e40af;line-height:1.5;"><strong>\u{1F4A1} Importante:</strong> Usa un correo electrónico real. El usuario podrá resetear su contraseña recibiendo un email a esta dirección.</div>' +
     '</div><div class="mf"><button class="btn bo" onclick="clM(\'addUM\')">Cancelar</button><button class="btn bp" id="nuBtn" onclick="doAddU()" style="width:auto">\u{1F4BE} Crear</button></div></div>';
   document.body.appendChild(d); setTimeout(function () { d.classList.add("ac"); }, 50);
 }
 
 async function doAddU() {
   var n = document.getElementById("nuName").value.trim(),
-    u = document.getElementById("nuUser").value.trim().toLowerCase(),
+    e = document.getElementById("nuEmail").value.trim().toLowerCase(),
     p = document.getElementById("nuPass").value,
     r = document.getElementById("nuRole").value;
 
-  if (!n || !u || !p) { toast("Todos los campos son requeridos", "error"); return; }
+  if (!n || !e || !p) { toast("Todos los campos son requeridos", "error"); return; }
+  if (e.indexOf("@") === -1) { toast("Ingresa un correo electrónico válido", "error"); return; }
   if (p.length < 6) { toast("Contraseña: mínimo 6 caracteres", "error"); return; }
   var b = document.getElementById("nuBtn"); b.disabled = true;
 
   try {
-    // Verificar que no exista el username
-    var existing = await db.collection("users").where("username", "==", u).limit(1).get();
-    if (!existing.empty) { toast("Usuario ya existe", "error"); b.disabled = false; return; }
+    // Verificar que no exista el email
+    var existing = await db.collection("users").where("email", "==", e).limit(1).get();
+    if (!existing.empty) { toast("Ya existe un usuario con ese correo", "error"); b.disabled = false; return; }
 
     // Crear usuario en Firebase Auth usando instancia secundaria
-    var email = _usernameToEmail(u);
     var secondaryApp = firebase.initializeApp(firebase.app().options, "Secondary" + Date.now());
-    var cred = await secondaryApp.auth().createUserWithEmailAndPassword(email, p);
+    var cred = await secondaryApp.auth().createUserWithEmailAndPassword(e, p);
     var newUid = cred.user.uid;
 
     // Crear documento en Firestore
     await db.collection("users").doc(newUid).set({
-      username: u, name: n, role: r, active: true,
+      email: e, name: n, role: r, active: true,
       createdAt: new Date().toISOString(), uid: newUid
     });
 
@@ -940,9 +949,9 @@ async function doAddU() {
     toast("\u2705 Usuario creado", "success");
     clM("addUM");
     loadU();
-  } catch (e) {
-    var msg = e.message;
-    if (e.code === "auth/email-already-in-use") msg = "Usuario ya existe";
+  } catch (err) {
+    var msg = err.message;
+    if (err.code === "auth/email-already-in-use") msg = "Ya existe una cuenta con ese correo en Firebase";
     toast("Error: " + msg, "error");
     b.disabled = false;
   }
@@ -954,7 +963,8 @@ function openEditU(uid) {
   d.innerHTML = '<div class="md"><div class="mh"><h3>\u270F\uFE0F Editar Usuario</h3><button class="mc" onclick="clM(\'editUM\')">\u2715</button></div>' +
     '<div class="mb">' +
     '<div class="fg"><label class="fl">Nombre</label><input type="text" id="euName" class="fi" value="' + escH(u.name) + '"></div>' +
-    '<div class="fg"><label class="fl">Nueva contraseña (vacío = no cambiar)</label><div class="pw"><input type="password" id="euPass" class="fi" placeholder="Nueva contraseña"><button type="button" class="pt" onclick="togglePw(\'euPass\',this)">\u{1F441}</button></div></div>' +
+    '<div class="fg"><label class="fl">Correo electrónico</label><input type="email" id="euEmail" class="fi" value="' + escH(u.email) + '" readonly style="background:#f1f5f9;cursor:not-allowed;"><div style="font-size:11px;color:var(--m);margin-top:4px;">El correo no se puede cambiar (es el identificador de la cuenta)</div></div>' +
+    '<div class="fg"><label class="fl">Contraseña</label><div style="padding:10px 0;"><button type="button" class="btn bw bs" onclick="sendResetEmail(\'' + uid + '\')">\u{1F4E7} Enviar email de reseteo</button><span style="display:block;margin-top:6px;font-size:11px;color:var(--m);">Se enviará un correo a <strong>' + escH(u.email) + '</strong> para que el usuario cambie su contraseña.</span></div></div>' +
     '<div class="fg"><label class="fl">Rol</label><select id="euRole" class="fi"><option value="viewer"' + (u.role === "viewer" ? " selected" : "") + '>\u{1F441} Visualizador</option><option value="gestionador"' + (u.role === "gestionador" ? " selected" : "") + '>\u270F\uFE0F Gestionador</option><option value="admin"' + (u.role === "admin" ? " selected" : "") + '>\u{1F6E1} Administrador</option></select></div>' +
     '</div><div class="mf"><button class="btn bo" onclick="clM(\'editUM\')">Cancelar</button><button class="btn bp" onclick="doEditU(\'' + uid + '\')" style="width:auto">\u{1F4BE} Guardar</button></div></div>';
   document.body.appendChild(d); setTimeout(function () { d.classList.add("ac"); }, 50);
@@ -962,22 +972,11 @@ function openEditU(uid) {
 
 async function doEditU(uid) {
   var n = document.getElementById("euName").value.trim(),
-    p = document.getElementById("euPass").value,
     r = document.getElementById("euRole").value;
-  var ud = { name: n, role: r };
-  if (p) { if (p.length < 6) { toast("Contraseña: mínimo 6 caracteres", "error"); return; } }
 
   try {
     await db.collection("users").doc(uid).update({ name: n, role: r });
-
-    // Si hay nueva contraseña, actualizar en Firebase Auth
-    if (p) {
-      // Nota: Cambiar contraseña de otro usuario requiere Admin SDK (server-side)
-      // Por ahora, actualizamos solo Firestore. Para contraseña, se necesitaría Cloud Function.
-      toast("\u2705 Usuario actualizado (contraseña no cambiada - requiere función server)", "info");
-    } else {
-      toast("\u2705 Usuario actualizado", "success");
-    }
+    toast("\u2705 Usuario actualizado", "success");
     clM("editUM"); loadU();
   } catch (e) { toast("Error: " + e.message, "error"); }
 }
@@ -1139,57 +1138,29 @@ async function doChangeMyPw() {
 
 // ============ RESET PASSWORD (ADMIN) ============
 function openResetPwU(uid) {
-  var u = S.users.find(function (x) { return x.id === uid; }); if (!u) return;
-  var d = document.createElement("div"); d.id = "resetPwM"; d.className = "mo";
-  d.innerHTML = '<div class="md"><div class="mh"><h3>\u{1F511} Restablecer Contraseña</h3><button class="mc" onclick="clM(\'resetPwM\')">\u2715</button></div>' +
-    '<div class="mb">' +
-    '<p style="font-size:14px;color:var(--t);margin-bottom:16px;">Restablecer contraseña de <strong>' + escH(u.name) + '</strong> (<code>' + escH(u.username) + '</code>)</p>' +
-    '<div class="fg"><label class="fl">Nueva contraseña</label><div class="pw"><input type="password" id="rpNew" class="fi" placeholder="Mínimo 6 caracteres"><button type="button" class="pt" onclick="togglePw(\'rpNew\',this)">\u{1F441}</button></div></div>' +
-    '<div class="fg"><label class="fl">Confirmar nueva contraseña</label><div class="pw"><input type="password" id="rpConf" class="fi" placeholder="Repite la nueva contraseña"><button type="button" class="pt" onclick="togglePw(\'rpConf\',this)">\u{1F441}</button></div></div>' +
-    '<div style="margin-top:12px;padding:12px;background:#fef3c7;border:1px solid #fde68a;border-radius:8px;font-size:12px;color:#92400e;line-height:1.5;"><strong>\u{1F4A1} Nota:</strong> Al cambiar la contraseña, el usuario deberá iniciar sesión nuevamente con su nueva contraseña.</div>' +
-    '</div><div class="mf"><button class="btn bo" onclick="clM(\'resetPwM\')">Cancelar</button><button class="btn bp" id="rpBtn" onclick="doResetPwU(\'' + uid + '\')" style="width:auto">\u{1F4BE} Restablecer</button></div></div>';
-  document.body.appendChild(d); setTimeout(function () { d.classList.add("ac"); }, 50);
+  // Redirigir directamente al envío de email de reseteo
+  sendResetEmail(uid);
 }
 
-async function doResetPwU(uid) {
-  var nw = document.getElementById("rpNew").value,
-    conf = document.getElementById("rpConf").value,
-    b = document.getElementById("rpBtn");
+async function sendResetEmail(uid) {
+  var u = S.users.find(function (x) { return x.id === uid; });
+  if (!u) { toast("Usuario no encontrado", "error"); return; }
 
-  if (!nw || !conf) { toast("Completa todos los campos", "error"); return; }
-  if (nw.length < 6) { toast("La nueva contraseña debe tener mínimo 6 caracteres", "error"); return; }
-  if (nw !== conf) { toast("Las contraseñas no coinciden", "error"); return; }
+  var email = u.email;
+  if (!email) { toast("Este usuario no tiene correo electrónico registrado", "error"); return; }
 
-  b.disabled = true; b.textContent = "Cambiando...";
+  // Confirmación antes de enviar
+  if (!confirm('¿Enviar email de reseteo de contraseña a ' + email + '?\n\nEl usuario recibirá un correo de Firebase para cambiar su contraseña.')) return;
 
   try {
-    var userData = S.users.find(function (x) { return x.id === uid; });
-    if (!userData) { toast("Usuario no encontrado", "error"); b.disabled = false; b.textContent = "\u{1F4BE} Restablecer"; return; }
-
-    // No se puede cambiar la contraseña de otro usuario desde el cliente sin Admin SDK.
-    // Mostramos instrucciones claras para hacerlo desde Firebase Console.
-    clM("resetPwM");
-
-    // Mostrar guía paso a paso
-    var guide = document.createElement("div"); guide.id = "resetGuide"; guide.className = "mo";
-    guide.innerHTML = '<div class="md"><div class="mh"><h3>\u{1F511} Cómo cambiar la contraseña</h3><button class="mc" onclick="clM(\'resetGuide\')">\u2715</button></div>' +
-      '<div class="mb">' +
-      '<p style="font-size:14px;margin-bottom:16px;">Para cambiar la contraseña de <strong>' + escH(userData.name) + '</strong>, sigue estos pasos:</p>' +
-      '<div style="background:#f1f5f9;border-radius:10px;padding:16px;margin-bottom:16px;">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;"><span style="background:var(--n);color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;">1</span><span style="font-size:13px;">Abre <a href="https://console.firebase.google.com/" target="_blank" style="color:var(--n);font-weight:600;">Firebase Console</a></span></div>' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;"><span style="background:var(--n);color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;">2</span><span style="font-size:13px;">Ve a <strong>Authentication</strong> \u2192 <strong>Users</strong></span></div>' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;"><span style="background:var(--n);color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;">3</span><span style="font-size:13px;">Busca el usuario <code style="background:#e2e8f0;padding:2px 6px;border-radius:4px;">' + escH(userData.username) + '@ruletero222.app</code></span></div>' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;"><span style="background:var(--n);color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;">4</span><span style="font-size:13px;">Haz clic en los <strong>tres puntos</strong> \u22EE \u2192 <strong>Cambiar contraseña</strong></span></div>' +
-      '<div style="display:flex;align-items:center;gap:10px;"><span style="background:var(--g);color:var(--n);width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;">5</span><span style="font-size:13px;">Escribe la nueva contraseña y guarda</span></div>' +
-      '</div>' +
-      '<div style="padding:12px;background:#dcfce7;border:1px solid #86efac;border-radius:8px;font-size:12px;color:#166534;"><strong>\u2705 Hecho:</strong> El usuario podrá iniciar sesión con la nueva contraseña inmediatamente.</div>' +
-      '</div><div class="mf"><button class="btn bp" onclick="clM(\'resetGuide\')" style="width:auto">Entendido</button></div></div>';
-    document.body.appendChild(guide); setTimeout(function () { guide.classList.add("ac"); }, 50);
-    b.disabled = false; b.textContent = "\u{1F4BE} Restablecer";
-
+    await auth.sendPasswordResetEmail(email);
+    toast("\u2705 Email de reseteo enviado a " + email, "success");
   } catch (e) {
-    toast("Error: " + e.message, "error");
-    b.disabled = false; b.textContent = "\u{1F4BE} Restablecer";
+    var msg = "Error al enviar email de reseteo";
+    if (e.code === "auth/user-not-found") msg = "No se encontró la cuenta de Firebase para este correo";
+    else if (e.code === "auth/too-many-requests") msg = "Demasiados intentos. Espera un momento";
+    else if (e.message) msg = e.message;
+    toast(msg, "error");
   }
 }
 
@@ -1202,24 +1173,28 @@ async function setupInitialAdmin() {
    * EJECUTA ESTA FUNCIÓN UNA SOLA VEZ desde la consola del navegador
    * para crear el usuario administrador inicial.
    * 
+   * IMPORTANTE: Cambia el email por tu correo real antes de ejecutar.
+   * 
    * Uso: setupInitialAdmin()
    */
   try {
+    // ⚠️ CAMBIA ESTE EMAIL POR TU CORREO REAL
+    var adminEmail = "tu-correo-real@gmail.com";
+
     // Verificar si ya existe el admin
-    var existing = await db.collection("users").where("username", "==", "admin").limit(1).get();
+    var existing = await db.collection("users").where("email", "==", adminEmail).limit(1).get();
     if (!existing.empty) {
-      toast("El usuario admin ya existe", "info");
+      toast("Ya existe un usuario con ese correo", "info");
       return;
     }
 
-    // Crear en Firebase Auth
-    var email = _usernameToEmail("admin");
-    var cred = await auth.createUserWithEmailAndPassword(email, "admin123");
+    // Crear en Firebase Auth con email real
+    var cred = await auth.createUserWithEmailAndPassword(adminEmail, "admin123");
     var uid = cred.user.uid;
 
     // Crear documento en Firestore
     await db.collection("users").doc(uid).set({
-      username: "admin",
+      email: adminEmail,
       name: "Administrador",
       role: "admin",
       active: true,
@@ -1233,7 +1208,7 @@ async function setupInitialAdmin() {
     // Cerrar sesión del admin recién creado
     await auth.signOut();
 
-    toast("✅ Admin creado. Usuario: admin | Contraseña: admin123", "success");
+    toast("✅ Admin creado. Email: " + adminEmail + " | Contraseña: admin123", "success");
     toast("⚠️ Cambia la contraseña después de iniciar sesión", "info");
   } catch (e) {
     toast("Error: " + e.message, "error");
