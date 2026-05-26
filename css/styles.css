@@ -326,14 +326,21 @@ input, select, textarea { font-family: inherit; }
 
 /* Badges */
 .cb {
-  position: absolute; top: 10px; left: 10px;
-  padding: 4px 10px; border-radius: 20px;
+  padding: 3px 10px; border-radius: 20px;
   font-size: 11px; font-weight: 700; z-index: 2;
+  display: inline-block;
+}
+.pi .cb, .pn .cb {
+  position: absolute; top: 10px; left: 10px;
 }
 .bh { background: var(--n); color: #fff; }
-.bc { background: var(--g); color: var(--n); }
-.bs2 { background: var(--s); color: var(--n); }
+.bc { background: var(--g); color: #1e293b; }
+.bs2 { background: var(--s); color: #1e293b; }
 .bx { background: #9ca3af; color: #fff; }
+[data-theme="dark"] .bh { background: #3b82f6; color: #fff; }
+[data-theme="dark"] .bc { background: #D4AF37; color: #1e293b; }
+[data-theme="dark"] .bs2 { background: #38bdf8; color: #0f172a; }
+[data-theme="dark"] .bx { background: #64748b; color: #fff; }
 .ic {
   position: absolute; top: 10px; right: 10px;
   background: rgba(0,43,92,.85); color: #fff;
