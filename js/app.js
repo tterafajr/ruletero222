@@ -242,20 +242,36 @@ async function doLogin() {
   }, 30000);
 
   try {
-    // Buscar usuario en Firestore por email para verificar que existe y está activo
-    var userDoc = await db.collection("users").where("email", "==", u.toLowerCase()).limit(1).get();
+    // PRIMERO: Autenticar con Firebase Auth
+    var email = u.toLowerCase();
+    var cred = await auth.signInWithEmailAndPassword(email, p);
+    var firebaseUser = cred.user;
 
-    if (userDoc.empty) {
+    // SEGUNDO: Buscar documento del usuario en Firestore por UID
+    var userDoc = await db.collection("users").doc(firebaseUser.uid).get();
+
+    // Si no existe por UID, buscar por email (compatibilidad con documentos migrados)
+    if (!userDoc.exists) {
+      var userQuery = await db.collection("users").where("email", "==", email).limit(1).get();
+      if (!userQuery.empty) {
+        userDoc = userQuery.docs[0];
+      }
+    }
+
+    if (!userDoc.exists) {
+      // El usuario existe en Auth pero no en Firestore - cerrar sesión
+      await auth.signOut();
       if (S.loginTimeout) { clearTimeout(S.loginTimeout); S.loginTimeout = null; }
-      er.textContent = "Correo no registrado";
+      er.textContent = "Tu cuenta no está registrada en el sistema. Contacta al administrador.";
       er.className = "lerr show";
       b.disabled = false;
       txt.textContent = "Iniciar Sesión";
       return;
     }
 
-    var userData = userDoc.docs[0].data();
+    var userData = userDoc.data();
     if (!userData.active) {
+      await auth.signOut();
       if (S.loginTimeout) { clearTimeout(S.loginTimeout); S.loginTimeout = null; }
       er.textContent = "Tu cuenta está desactivada. Contacta al administrador.";
       er.className = "lerr show";
@@ -264,17 +280,12 @@ async function doLogin() {
       return;
     }
 
-    // Autenticar con Firebase Auth usando el email real
-    var email = u.toLowerCase();
-    var cred = await auth.signInWithEmailAndPassword(email, p);
-    var firebaseUser = cred.user;
-
     // Construir objeto de usuario para la app
     S.user = {
       id: userDoc.id,
       uid: firebaseUser.uid,
-      email: userData.email,
-      username: userData.email,
+      email: userData.email || email,
+      username: userData.email || email,
       name: userData.name,
       role: userData.role
     };
@@ -295,7 +306,7 @@ async function doLogin() {
     if (S.loginTimeout) { clearTimeout(S.loginTimeout); S.loginTimeout = null; }
     var msg = "Error de conexión";
     if (e.code === "auth/user-not-found" || e.code === "auth/wrong-password" || e.code === "auth/invalid-credential") {
-      msg = "Usuario o contraseña incorrectos";
+      msg = "Correo o contraseña incorrectos";
     } else if (e.code === "auth/too-many-requests") {
       msg = "Demasiados intentos. Espera un momento.";
     } else if (e.message) {
