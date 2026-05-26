@@ -629,10 +629,13 @@ input, select, textarea { font-family: inherit; }
 .audit-table {
   width: 100%; border-collapse: collapse; background: var(--cb);
   border-radius: var(--r); overflow: hidden; box-shadow: 0 1px 3px var(--shadow);
+  min-width: 500px;
 }
-.audit-table th { background: var(--n); color: #fff; padding: 10px 14px; font-size: 11px; font-weight: 700; text-align: left; }
+.audit-table th { background: var(--n); color: #fff; padding: 10px 14px; font-size: 11px; font-weight: 700; text-align: left; white-space: nowrap; }
 .audit-table td { padding: 10px 14px; font-size: 12px; border-bottom: 1px solid var(--bd); }
 .audit-table tr:hover td { background: #f8fafc; }
+.audit-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: var(--r); }
+[data-theme="dark"] .audit-table tr:hover td { background: #1e293b; }
 .audit-action { padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; }
 .audit-create { background: #dcfce7; color: #166534; }
 .audit-update { background: #dbeafe; color: #1e40af; }
