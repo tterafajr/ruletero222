@@ -1197,11 +1197,12 @@ function rSettings() {
   var curLogo = S.logoUrl || (S.settingsData && S.settingsData.logoUrl) || "";
   var h = '<div class="so"><div class="dh"><h2>⚙️ Configuración</h2><button class="hbn" onclick="togSettings()">✕ Cerrar</button></div><div class="sc">';
 
-  h += '<div class="slg"><h4>🎨 Logo de la Aplicación</h4><p>Ingresa la URL de tu logo para reemplazar la letra "R". Se recomienda una imagen cuadrada (PNG con fondo transparente funciona mejor).</p>';
+  h += '<div class="slg"><h4>🎨 Logo de la Aplicación</h4><p>Sube una imagen desde tu dispositivo o pega una URL. Se recomienda PNG cuadrado con fondo transparente.</p>';
   h += '<div class="sprv"><div>' + (curLogo ? '<div class="lo" style="background:#fff;display:flex;align-items:center;justify-content:center;"><img src="' + escH(curLogo) + '" alt="Logo"></div>' : logoHTML("lo", "lg")) + '</div><div>' + (curLogo ? '<div class="hl" style="background:#fff;display:flex;align-items:center;justify-content:center;"><img src="' + escH(curLogo) + '" alt="Logo"></div>' : logoHTML("hl", "md")) + '</div><div>' + (curLogo ? '<div class="fl2" style="background:#fff;display:flex;align-items:center;justify-content:center;"><img src="' + escH(curLogo) + '" alt="Logo"></div>' : logoHTML("fl2", "sm")) + '</div><div><div class="sprv-label">Vista previa: Login | Header | Footer</div></div></div>';
+  h += '<div class="fg"><label class="fl">📁 Subir logo desde tu dispositivo</label><div class="iupload" onclick="document.getElementById(\'logoFile\').click()"><input type="file" id="logoFile" accept="image/*" onchange="uploadLogo(this)" style="display:none"><div class="iupload-icon">🖼️</div><div class="iupload-text">Haz clic para subir tu logo</div><div class="iupload-hint">PNG, JPG, WEBP — Máximo 5 MB</div><div id="logoProgress" class="iupload-progress" style="display:none"><div id="logoBar" class="iupload-progress-bar" style="width:0%"></div></div></div></div>';
+  h += '<div style="text-align:center;color:var(--m);font-size:12px;margin:12px 0;">— o pega una URL manualmente —</div>';
   h += '<div class="fg"><label class="fl">URL del Logo</label><input type="url" id="sLogoUrl" class="fi" value="' + escH(curLogo) + '" placeholder="https://ejemplo.com/mi-logo.png"></div>';
-  h += '<div style="display:flex;gap:10px;"><button class="btn bp" onclick="saveLogo()" style="width:auto;flex:1">💾 Guardar Logo</button>' + (curLogo ? '<button class="btn bd" onclick="removeLogo()" style="width:auto">🗑 Quitar Logo</button>' : '') + '</div>';
-  h += '<div style="margin-top:12px;padding:12px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;font-size:12px;color:#92400e;"><strong>💡 Tip:</strong> Puedes subir tu logo a <a href="https://imgur.com/upload" target="_blank" style="color:var(--n);font-weight:600;">Imgur</a> o <a href="https://drive.google.com" target="_blank" style="color:var(--n);font-weight:600;">Google Drive</a> y pegar el enlace directo aquí.<br><br>Para Google Drive usa el formato:<br><code style="font-size:11px;background:#fef3c7;padding:2px 6px;border-radius:4px;">https://drive.google.com/uc?export=view&id=FILE_ID</code></div>';
+  h += '<div style="display:flex;gap:10px;"><button class="btn bp" onclick="saveLogo()" style="width:auto;flex:1">💾 Guardar URL</button>' + (curLogo ? '<button class="btn bd" onclick="removeLogo()" style="width:auto">🗑 Quitar Logo</button>' : '') + '</div>';
   h += '</div>';
 
   h += '<div class="slg"><h4>📋 Información del Sistema</h4><div style="font-size:13px;color:var(--m);line-height:1.8;">';
@@ -1257,11 +1258,53 @@ async function saveLogo() {
     S.logoUrl = url;
     if (S.settingsData) S.settingsData.logoUrl = url;
     localStorage.setItem("rt_lu", url);
-    _audit("update_settings", "Logo actualizado");
+    _audit("update_settings", "Logo actualizado via URL");
     toast("✅ Logo guardado correctamente", "success");
     renderApp();
     setTimeout(loadAuditLog, 100);
   } catch (e) { toast("Error: " + e.message, "error"); }
+}
+
+async function uploadLogo(input) {
+  var file = input.files[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) { toast("La imagen no debe superar 5 MB", "error"); return; }
+  if (!file.type.startsWith("image/")) { toast("Solo se permiten imágenes", "error"); return; }
+
+  toast("Subiendo logo...", "info");
+  var prog = document.getElementById("logoProgress");
+  var bar = document.getElementById("logoBar");
+  if (prog) prog.style.display = "block";
+
+  try {
+    var ref = storage.ref("config/logo_" + Date.now() + "_" + file.name);
+    var uploadTask = ref.put(file);
+
+    var url = await new Promise(function (resolve, reject) {
+      uploadTask.on("state_changed",
+        function (snapshot) {
+          var progress = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
+          if (bar) bar.style.width = progress + "%";
+        },
+        function (error) { reject(error); },
+        function () {
+          uploadTask.snapshot.ref.getDownloadURL().then(resolve).catch(reject);
+        }
+      );
+    });
+
+    await db.collection("config").doc("app").set({ logoUrl: url }, { merge: true });
+    S.logoUrl = url;
+    if (S.settingsData) S.settingsData.logoUrl = url;
+    localStorage.setItem("rt_lu", url);
+    _audit("update_settings", "Logo subido desde archivo");
+    toast("✅ Logo subido correctamente", "success");
+    renderApp();
+    setTimeout(loadAuditLog, 100);
+  } catch (e) {
+    toast("Error al subir logo: " + e.message, "error");
+    if (prog) prog.style.display = "none";
+  }
 }
 
 async function removeLogo() {
