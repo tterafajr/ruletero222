@@ -3,13 +3,15 @@
  * Versión GitHub Pages + Firebase
  * 
  * Migrado de Google Apps Script a Firebase Firestore + Auth
+ * 
+ * v7.0 — Agregado: Firebase Storage, Realtime, Auditoría, CSV, Modo Oscuro
  */
 
 // ============ ESTADO GLOBAL ============
 var S = {
   user: null,
   posts: [],
-  allPosts: [],      // Cache completo para dashboard
+  allPosts: [],
   total: 0,
   page: 1,
   tp: 1,
@@ -30,11 +32,13 @@ var S = {
   editPostData: null,
   fetchedImage: "",
   loginTimeout: null,
-  unsubPosts: null   // Firestore listener unsubscribe
+  unsubPosts: null,
+  darkMode: false,
+  uploadedFile: null,
+  uploadedUrl: ""
 };
 
 // ============ CONSTANTES ============
-// Email real: los usuarios se registran con su correo electrónico real
 var POSTS_PER_PAGE = 12;
 
 // ============ HELPERS ============
@@ -75,9 +79,43 @@ function _roleIcon(r) { return r === "admin" ? "\u{1F6E1}" : r === "gestionador"
 function _roleBadgeCls(r) { return r === "admin" ? "ra" : r === "gestionador" ? "rg" : "rv"; }
 function _roleUVCls(r) { return r === "admin" ? "ad" : r === "gestionador" ? "gst" : "vi"; }
 
-// ============ FIRESTORE HELPERS ============
-// Helpers de email eliminados - ahora se usan emails reales directamente
+// ============ DARK MODE ============
+function _initDarkMode() {
+  var saved = localStorage.getItem("rt_dm");
+  if (saved === "true") {
+    S.darkMode = true;
+    document.documentElement.setAttribute("data-theme", "dark");
+  } else if (saved === null && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    S.darkMode = true;
+    document.documentElement.setAttribute("data-theme", "dark");
+  }
+}
 
+function _toggleDarkMode() {
+  S.darkMode = !S.darkMode;
+  document.documentElement.setAttribute("data-theme", S.darkMode ? "dark" : "light");
+  localStorage.setItem("rt_dm", S.darkMode ? "true" : "false");
+  toast(S.darkMode ? "Modo oscuro activado" : "Modo claro activado", "info");
+}
+
+// ============ AUDIT LOG ============
+async function _audit(action, details) {
+  if (!S.user) return;
+  try {
+    await db.collection("audit").add({
+      action: action,
+      details: details || "",
+      userId: S.user.uid || S.user.id,
+      userName: S.user.name,
+      userEmail: S.user.email,
+      timestamp: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  } catch (e) {
+    console.error("Error writing audit:", e);
+  }
+}
+
+// ============ FIRESTORE HELPERS ============
 function _classify(text, title) {
   var c = ((text || "") + " " + (title || "")).toLowerCase();
   var hk = ["historia", "histórico", "antiguo", "siglo", "época", "patrimonio", "tradicional", "tradición", "museo", "monumento", "fundación", "conquista", "revolución", "independencia", "prehispánico", "arqueológ", "restauración", "legado", "pasado", "conmemor", "homenaje", "puebla", "poblano", "cholula"];
@@ -101,15 +139,11 @@ function _catColor(c) { return { historico: "#002B5C", cultural: "#D4AF37", soci
 async function fetchPostMeta(url) {
   try {
     if (!url) return { ok: false, error: "URL requerida" };
-
     var meta = { image: "", title: "", description: "" };
-
-    // Intentar con proxy CORS
     var proxyUrls = [
       "https://api.allorigins.win/get?url=",
       "https://corsproxy.io/?"
     ];
-
     var html = null;
     for (var p = 0; p < proxyUrls.length; p++) {
       try {
@@ -120,36 +154,23 @@ async function fetchPostMeta(url) {
         html = data.contents || data;
         if (html && html.length > 100) break;
         html = null;
-      } catch (e) {
-        continue;
-      }
+      } catch (e) { continue; }
     }
-
     if (!html) return { ok: true, meta: meta };
-
-    // Extraer og:image
     var ogImgMatch = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
     if (!ogImgMatch) ogImgMatch = html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:image["']/i);
     if (ogImgMatch) meta.image = _htmlDecode(ogImgMatch[1]);
-
-    // Extraer og:title
     var ogTitleMatch = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i);
     if (!ogTitleMatch) ogTitleMatch = html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:title["']/i);
     if (ogTitleMatch) meta.title = _htmlDecode(ogTitleMatch[1]);
-
-    // Extraer og:description
     var ogDescMatch = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i);
     if (!ogDescMatch) ogDescMatch = html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:description["']/i);
     if (ogDescMatch) meta.description = _htmlDecode(ogDescMatch[1]);
-
-    // Fallback: twitter:image
     if (!meta.image) {
       var twImgMatch = html.match(/<meta[^>]*name=["']twitter:image["'][^>]*content=["']([^"']+)["']/i);
       if (!twImgMatch) twImgMatch = html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']twitter:image["']/i);
       if (twImgMatch) meta.image = _htmlDecode(twImgMatch[1]);
     }
-
-    // Fallback: buscar <img> con src relevante
     if (!meta.image) {
       var imgMatches = html.match(/<img[^>]+src=["']([^"']+)["']/gi);
       if (imgMatches) {
@@ -165,7 +186,6 @@ async function fetchPostMeta(url) {
         }
       }
     }
-
     return { ok: true, meta: meta };
   } catch (e) {
     return { ok: false, error: e.message };
@@ -179,12 +199,110 @@ function _htmlDecode(str) {
     .replace(/&nbsp;/g, " ");
 }
 
+// ============ IMAGE UPLOAD (Firebase Storage) ============
+function _renderUploadArea(id, currentImg) {
+  var hasImg = currentImg ? true : false;
+  var h = '<div class="iupload" onclick="document.getElementById(\'' + id + '\').click()">';
+  h += '<input type="file" id="' + id + '" accept="image/*" onchange="_handleFileSelect(\'' + id + '\', this)">';
+  if (hasImg) {
+    h += '<div class="iupload-preview"><img src="' + escH(currentImg) + '" alt="Imagen">';
+    h += '<button class="iupload-remove" onclick="event.stopPropagation(); _removeUpload(\'' + id + '\')">Quitar</button></div>';
+  } else {
+    h += '<div class="iupload-icon">📷</div>';
+    h += '<div class="iupload-text">Haz clic para subir una imagen</div>';
+    h += '<div class="iupload-hint">JPG, PNG, WEBP — Máximo 5 MB</div>';
+  }
+  h += '<div id="' + id + '-progress" class="iupload-progress" style="display:none"><div id="' + id + '-bar" class="iupload-progress-bar" style="width:0%"></div></div>';
+  h += '</div>';
+  return h;
+}
+
+function _handleFileSelect(inputId, input) {
+  var file = input.files[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) {
+    toast("La imagen no debe superar 5 MB", "error");
+    input.value = "";
+    return;
+  }
+  if (!file.type.startsWith("image/")) {
+    toast("Solo se permiten imágenes", "error");
+    input.value = "";
+    return;
+  }
+  S.uploadedFile = file;
+  S.uploadedUrl = "";
+  // Show preview
+  var reader = new FileReader();
+  reader.onload = function (e) {
+    var container = input.closest(".iupload");
+    if (container) {
+      container.innerHTML = '<input type="file" id="' + inputId + '" accept="image/*" onchange="_handleFileSelect(\'' + inputId + '\', this)" style="display:none">';
+      container.innerHTML += '<div class="iupload-preview"><img src="' + e.target.result + '" alt="Preview">';
+      container.innerHTML += '<button class="iupload-remove" onclick="event.stopPropagation(); _removeUpload(\'' + inputId + '\')">Quitar</button></div>';
+      container.innerHTML += '<div id="' + inputId + '-progress" class="iupload-progress" style="display:none"><div id="' + inputId + '-bar" class="iupload-progress-bar" style="width:0%"></div></div>';
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+function _removeUpload(inputId) {
+  S.uploadedFile = null;
+  S.uploadedUrl = "";
+  var container = document.getElementById(inputId);
+  if (container) container.closest(".iupload").querySelector("input").value = "";
+  // Reset upload area
+  var uploadDiv = container ? container.closest(".iupload") : null;
+  if (uploadDiv) {
+    uploadDiv.innerHTML = '<input type="file" id="' + inputId + '" accept="image/*" onchange="_handleFileSelect(\'' + inputId + '\', this)" style="display:none">';
+    uploadDiv.innerHTML += '<div class="iupload-icon">📷</div>';
+    uploadDiv.innerHTML += '<div class="iupload-text">Haz clic para subir una imagen</div>';
+    uploadDiv.innerHTML += '<div class="iupload-hint">JPG, PNG, WEBP — Máximo 5 MB</div>';
+    uploadDiv.innerHTML += '<div id="' + inputId + '-progress" class="iupload-progress" style="display:none"><div id="' + inputId + '-bar" class="iupload-progress-bar" style="width:0%"></div></div>';
+  }
+  S.fetchedImage = "";
+}
+
+async function _uploadImageToStorage(file, postId) {
+  if (!file) return null;
+  try {
+    var fileName = "posts/" + (postId || Date.now()) + "/" + Date.now() + "_" + file.name;
+    var ref = storage.ref(fileName);
+    var uploadTask = ref.put(file);
+
+    return new Promise(function (resolve, reject) {
+      uploadTask.on("state_changed",
+        function (snapshot) {
+          var progress = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
+          var bar = document.getElementById("aFile-bar") || document.getElementById("eFile-bar");
+          var prog = document.getElementById("aFile-progress") || document.getElementById("eFile-progress");
+          if (bar) bar.style.width = progress + "%";
+          if (prog) prog.style.display = "block";
+        },
+        function (error) {
+          console.error("Upload error:", error);
+          reject(error);
+        },
+        function () {
+          uploadTask.snapshot.ref.getDownloadURL().then(function (url) {
+            resolve(url);
+          }).catch(reject);
+        }
+      );
+    });
+  } catch (e) {
+    console.error("Storage error:", e);
+    return null;
+  }
+}
+
 // ============ AUTH ============
 function clearS() {
   localStorage.removeItem("rt_tk");
   localStorage.removeItem("rt_u");
   localStorage.removeItem("rt_lu");
   S.user = null; S.token = null; S.logoUrl = "";
+  _stopPostsListener();
 }
 
 function renderLogin() {
@@ -193,7 +311,7 @@ function renderLogin() {
     '<h1 class="lt">RULETERO 222</h1><p class="ls">La Ruta de los Poblanos</p>' +
     '<div id="lErr" class="lerr"></div>' +
     '<div class="fg"><label class="fl">Correo electrónico</label><input type="email" id="lUser" class="fi" placeholder="tu@correo.com" autocomplete="email"></div>' +
-    '<div class="fg"><label class="fl">Contraseña</label><div class="pw"><input type="password" id="lPass" class="fi" placeholder="Ingresa tu contraseña" autocomplete="current-password"><button type="button" class="pt" onclick="togglePw(\'lPass\',this)" title="Mostrar/ocultar">\u{1F441}</button></div></div>' +
+    '<div class="fg"><label class="fl">Contraseña</label><div class="pw"><input type="password" id="lPass" class="fi" placeholder="Ingresa tu contraseña" autocomplete="current-password"><button type="button" class="pt" onclick="togglePw(\'lPass\',this)" title="Mostrar/ocultar">👁</button></div></div>' +
     '<button class="btn bp" id="lBtn" onclick="doLogin()"><span id="lTxt">Iniciar Sesión</span></button>' +
     '<p style="text-align:center;font-size:11px;color:var(--m);margin-top:16px;">Acceso exclusivo para miembros del equipo</p>' +
     '<div class="lreset"><a onclick="clearS();toast(\'Sesión limpiada\',\'info\')">Limpiar sesión guardada</a></div>' +
@@ -219,7 +337,6 @@ async function doLogin() {
     return;
   }
 
-  // Validar que sea un email
   if (u.indexOf("@") === -1) {
     er.textContent = "Ingresa tu correo electrónico (ej: tu@correo.com)";
     er.className = "lerr show";
@@ -230,7 +347,6 @@ async function doLogin() {
   txt.innerHTML = '<span class="sp spw" style="width:16px;height:16px;border-width:2px;"></span> Verificando...';
   er.className = "lerr";
 
-  // Timeout de 30 segundos
   if (S.loginTimeout) clearTimeout(S.loginTimeout);
   S.loginTimeout = setTimeout(function () {
     if (b.disabled) {
@@ -242,24 +358,17 @@ async function doLogin() {
   }, 30000);
 
   try {
-    // PRIMERO: Autenticar con Firebase Auth
     var email = u.toLowerCase();
     var cred = await auth.signInWithEmailAndPassword(email, p);
     var firebaseUser = cred.user;
 
-    // SEGUNDO: Buscar documento del usuario en Firestore por UID
     var userDoc = await db.collection("users").doc(firebaseUser.uid).get();
-
-    // Si no existe por UID, buscar por email (compatibilidad con documentos migrados)
     if (!userDoc.exists) {
       var userQuery = await db.collection("users").where("email", "==", email).limit(1).get();
-      if (!userQuery.empty) {
-        userDoc = userQuery.docs[0];
-      }
+      if (!userQuery.empty) userDoc = userQuery.docs[0];
     }
 
     if (!userDoc.exists) {
-      // El usuario existe en Auth pero no en Firestore - cerrar sesión
       await auth.signOut();
       if (S.loginTimeout) { clearTimeout(S.loginTimeout); S.loginTimeout = null; }
       er.textContent = "Tu cuenta no está registrada en el sistema. Contacta al administrador.";
@@ -280,7 +389,6 @@ async function doLogin() {
       return;
     }
 
-    // Construir objeto de usuario para la app
     S.user = {
       id: userDoc.id,
       uid: firebaseUser.uid,
@@ -294,13 +402,14 @@ async function doLogin() {
     localStorage.setItem("rt_tk", S.token);
     localStorage.setItem("rt_u", JSON.stringify(S.user));
 
-    // Cargar datos iniciales
     await _loadInitialData();
 
     if (S.loginTimeout) { clearTimeout(S.loginTimeout); S.loginTimeout = null; }
     renderApp();
     renderPosts();
     renderPag();
+
+    _audit("login", "Inicio de sesión");
 
   } catch (e) {
     if (S.loginTimeout) { clearTimeout(S.loginTimeout); S.loginTimeout = null; }
@@ -321,15 +430,12 @@ async function doLogin() {
 
 async function _loadInitialData() {
   try {
-    // Cargar logo
     var cfgDoc = await db.collection("config").doc("app").get();
     if (cfgDoc.exists && cfgDoc.data().logoUrl) {
       S.logoUrl = cfgDoc.data().logoUrl;
       localStorage.setItem("rt_lu", S.logoUrl);
     }
-
-    // Cargar posts
-    await _fetchPostsFromFirestore();
+    _startPostsListener();
     S.loading = false;
   } catch (e) {
     console.error("Error cargando datos iniciales:", e);
@@ -338,6 +444,7 @@ async function _loadInitialData() {
 }
 
 function doLogout() {
+  _audit("logout", "Cierre de sesión");
   auth.signOut().then(function () {
     clearS();
     renderLogin();
@@ -349,20 +456,16 @@ function doLogout() {
 
 // ============ SESSION RECOVERY ============
 function init() {
+  _initDarkMode();
   var lu = localStorage.getItem("rt_lu");
   if (lu) S.logoUrl = lu;
 
-  // Cargar logo público
   _fetchLogo();
 
-  // Verificar si hay sesión activa en Firebase Auth
   auth.onAuthStateChanged(function (firebaseUser) {
     if (firebaseUser) {
-      // Mostrar loading mientras validamos
       var a = document.getElementById("app");
       a.innerHTML = '<div class="lss"><div style="text-align:center"><div class="sp" style="width:40px;height:40px;margin:0 auto 16px"></div><div style="color:#64748b;font-size:14px">Verificando sesión...</div><div style="margin-top:12px"><a href="#" onclick="forceShowLogin();return false;" style="color:#94a3b8;font-size:12px">Iniciar sesión manualmente</a></div></div></div>';
-
-      // Recuperar datos del usuario desde Firestore
       _recoverSession(firebaseUser);
     } else {
       clearS();
@@ -376,7 +479,6 @@ async function _recoverSession(firebaseUser) {
     var storedUser = localStorage.getItem("rt_u");
     if (storedUser) {
       var parsed = JSON.parse(storedUser);
-      // Verificar que el usuario aún existe y está activo en Firestore
       var userDoc = await db.collection("users").doc(parsed.id).get();
       if (userDoc.exists) {
         var ud = userDoc.data();
@@ -391,7 +493,6 @@ async function _recoverSession(firebaseUser) {
           };
           S.token = await firebaseUser.getIdToken();
           localStorage.setItem("rt_u", JSON.stringify(S.user));
-
           await _loadInitialData();
           renderApp();
           renderPosts();
@@ -401,7 +502,6 @@ async function _recoverSession(firebaseUser) {
         }
       }
     }
-    // Si no se pudo recuperar la sesión
     clearS();
     renderLogin();
   } catch (e) {
@@ -431,7 +531,44 @@ async function _fetchLogo() {
   } catch (e) { /* silencioso */ }
 }
 
-// ============ POSTS - FIRESTORE ============
+// ============ POSTS - REALTIME LISTENER ============
+function _startPostsListener() {
+  _stopPostsListener();
+  S.unsubPosts = db.collection("posts").orderBy("createdAt", "desc")
+    .onSnapshot(function (snapshot) {
+      S.allPosts = [];
+      snapshot.forEach(function (doc) {
+        var d = doc.data();
+        S.allPosts.push({
+          id: doc.id,
+          url: d.url || "",
+          postText: d.postText || "",
+          postDate: d.postDate || "",
+          pageTitle: d.pageTitle || "",
+          category: d.category || "sin_clasificar",
+          addedBy: d.addedBy || "Anónimo",
+          createdAt: d.createdAt || "",
+          images: d.images || []
+        });
+      });
+      _applyFilters();
+      renderPosts();
+      renderPag();
+      updateCounter();
+      loadYears();
+    }, function (err) {
+      console.error("Error en listener de posts:", err);
+      toast("Error en actualizaciones en tiempo real", "error");
+    });
+}
+
+function _stopPostsListener() {
+  if (S.unsubPosts) {
+    S.unsubPosts();
+    S.unsubPosts = null;
+  }
+}
+
 async function _fetchPostsFromFirestore(bustCache) {
   try {
     var snapshot = await db.collection("posts").orderBy("createdAt", "desc").get();
@@ -460,16 +597,12 @@ async function _fetchPostsFromFirestore(bustCache) {
 
 function _applyFilters() {
   var filtered = S.allPosts.slice();
-
-  // Filtro por año
   if (S.yearFilter && S.yearFilter !== "todos") {
     filtered = filtered.filter(function (p) {
       var d = p.postDate || p.createdAt || "";
       return d.substring(0, 4) === S.yearFilter;
     });
   }
-
-  // Filtro por búsqueda
   if (S.search && S.search.trim()) {
     var sl = S.search.toLowerCase();
     filtered = filtered.filter(function (p) {
@@ -479,7 +612,6 @@ function _applyFilters() {
         (p.addedBy || "").toLowerCase().indexOf(sl) > -1;
     });
   }
-
   S.total = filtered.length;
   S.tp = Math.ceil(S.total / POSTS_PER_PAGE) || 1;
   var start = (S.page - 1) * POSTS_PER_PAGE;
@@ -502,39 +634,17 @@ function updateCounter() {
   if (el) el.textContent = S.total + " publicaciones";
 }
 
-// ===== OPTIMISTIC UPDATES (igual que original) =====
+// ===== OPTIMISTIC UPDATES =====
 function onPostAdded(r, url, txt, dt, ttl, imgs, selCat) {
-  var newPost = {
-    id: r.id, url: url, postText: txt, postDate: dt, pageTitle: ttl,
-    category: r.category || selCat || "sin_clasificar", addedBy: S.user.name,
-    createdAt: new Date().toISOString(), images: imgs
-  };
-  S.allPosts.unshift(newPost);
-  S.total++;
-  S.tp = Math.ceil(S.total / POSTS_PER_PAGE) || 1;
-  _applyFilters();
-  renderPosts(); renderPag(); updateCounter();
-  loadYears();
+  // No longer needed with realtime — the listener will handle it
 }
 
 function onPostUpdated(postId, url, txt, dt, ttl, cat, imgs) {
-  for (var i = 0; i < S.allPosts.length; i++) {
-    if (S.allPosts[i].id === postId) {
-      S.allPosts[i].url = url; S.allPosts[i].postText = txt; S.allPosts[i].postDate = dt;
-      S.allPosts[i].pageTitle = ttl; S.allPosts[i].category = cat; S.allPosts[i].images = imgs;
-      break;
-    }
-  }
-  _applyFilters();
-  renderPosts();
+  // No longer needed with realtime — the listener will handle it
 }
 
 function onPostDeleted(id) {
-  S.allPosts = S.allPosts.filter(function (p) { return p.id !== id; });
-  S.total = Math.max(0, S.total - 1);
-  S.tp = Math.ceil(S.total / POSTS_PER_PAGE) || 1;
-  _applyFilters();
-  renderPosts(); renderPag(); updateCounter();
+  // No longer needed with realtime — the listener will handle it
 }
 
 // ============ POSTS CRUD ============
@@ -545,10 +655,10 @@ function catBadge(c) {
 }
 
 function postButtons(p, ad, canEdit) {
-  if (!canEdit && !ad) return '<div class="pa"><a href="' + escH(p.url) + '" target="_blank" class="btn bo bs">\u{1F517} Abrir</a></div>';
-  var h = '<div class="pa"><a href="' + escH(p.url) + '" target="_blank" class="btn bo bs">\u{1F517} Abrir</a>';
-  if (canEdit) h += '<button class="btn bw bs" onclick="openEditPost(\'' + p.id + '\')">\u270F\uFE0F Editar</button>';
-  if (ad) h += '<button class="btn bd bs" onclick="delPost(\'' + p.id + '\')">\u{1F5D1} Eliminar</button>';
+  if (!canEdit && !ad) return '<div class="pa"><a href="' + escH(p.url) + '" target="_blank" class="btn bo bs">🔗 Abrir</a></div>';
+  var h = '<div class="pa"><a href="' + escH(p.url) + '" target="_blank" class="btn bo bs">🔗 Abrir</a>';
+  if (canEdit) h += '<button class="btn bw bs" onclick="openEditPost(\'' + p.id + '\')">✏️ Editar</button>';
+  if (ad) h += '<button class="btn bd bs" onclick="delPost(\'' + p.id + '\')">🗑 Eliminar</button>';
   h += '</div>';
   return h;
 }
@@ -557,8 +667,8 @@ async function delPost(id) {
   if (!confirm("¿Eliminar este post?")) return;
   try {
     await db.collection("posts").doc(id).delete();
-    toast("\u2705 Post eliminado", "success");
-    onPostDeleted(id);
+    _audit("delete_post", "Post eliminado: " + id);
+    toast("✅ Post eliminado", "success");
   } catch (e) {
     toast("Error: " + e.message, "error");
   }
@@ -574,7 +684,7 @@ function renderPosts() {
     return;
   }
   if (S.posts.length === 0) {
-    c.innerHTML = '<div class="es"><div class="ei">\u{1F4DD}</div><div class="et">Sin publicaciones</div><div class="ex">Agrega tu primer post de Facebook</div></div>';
+    c.innerHTML = '<div class="es"><div class="ei">📝</div><div class="et">Sin publicaciones</div><div class="ex">Agrega tu primer post de Facebook</div></div>';
     return;
   }
   var h = "";
@@ -584,10 +694,10 @@ function renderPosts() {
     for (var i = 0; i < S.posts.length; i++) {
       var p = S.posts[i]; var img = p.images && p.images.length > 0 ? p.images[0] : "";
       h += '<div class="pc">' +
-        (img ? '<div class="pi" onclick="pvImg(' + i + ')">' + catBadge(p.category) + (p.images.length > 1 ? '<span class="ic">' + p.images.length + ' \u{1F4F7}</span>' : '') + '<img src="' + escH(img) + '" alt="Post" loading="lazy"></div>' : '<div class="pn">' + catBadge(p.category) + '<span style="font-size:40px;color:#cbd5e1;">\u{1F4DD}</span></div>') +
+        (img ? '<div class="pi" onclick="pvImg(' + i + ')">' + catBadge(p.category) + (p.images.length > 1 ? '<span class="ic">' + p.images.length + ' 📷</span>' : '') + '<img src="' + escH(img) + '" alt="Post" loading="lazy"></div>' : '<div class="pn">' + catBadge(p.category) + '<span style="font-size:40px;color:#cbd5e1;">📝</span></div>') +
         '<div class="pb"><div class="pjt">' + escH(p.pageTitle || p.postText || "Sin título") + '</div>' +
         (p.postText && p.pageTitle ? '<div class="pjt2">' + escH(p.postText) + '</div>' : '') +
-        '<div class="pm"><span>\u{1F4C5} ' + (p.postDate || "Sin fecha") + '</span><span>\u{1F464} ' + escH(p.addedBy) + '</span></div>' +
+        '<div class="pm"><span>📅 ' + (p.postDate || "Sin fecha") + '</span><span>👤 ' + escH(p.addedBy) + '</span></div>' +
         postButtons(p, ad, canEdit) + '</div></div>';
     }
     h += '</div>';
@@ -600,7 +710,7 @@ function renderPosts() {
         '<div class="plb"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' + catBadge(p.category) +
         '<strong style="font-size:14px;color:var(--n);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escH(p.pageTitle || "Sin título") + '</strong></div>' +
         (p.postText ? '<div class="pjt2">' + escH(p.postText) + '</div>' : '') +
-        '<div class="pm"><span>\u{1F4C5} ' + (p.postDate || "Sin fecha") + '</span><span>\u{1F464} ' + escH(p.addedBy) + '</span></div>' +
+        '<div class="pm"><span>📅 ' + (p.postDate || "Sin fecha") + '</span><span>👤 ' + escH(p.addedBy) + '</span></div>' +
         postButtons(p, ad, canEdit) + '</div></div>';
     }
     h += '</div>';
@@ -611,10 +721,10 @@ function renderPosts() {
 function renderPag() {
   var c = document.getElementById("pgC"); if (!c) return;
   if (S.tp <= 1) { c.innerHTML = ""; return; }
-  var h = '<div class="pg2"><button ' + (S.page <= 1 ? "disabled" : "") + ' onclick="goP(' + (S.page - 1) + ')">\u2190 Anterior</button>';
+  var h = '<div class="pg2"><button ' + (S.page <= 1 ? "disabled" : "") + ' onclick="goP(' + (S.page - 1) + ')">← Anterior</button>';
   var s = Math.max(1, S.page - 2), e = Math.min(S.tp, S.page + 2);
   for (var i = s; i <= e; i++) { h += '<button class="' + (i === S.page ? "ac" : "") + '" onclick="goP(' + i + ')">' + i + '</button>'; }
-  h += '<button ' + (S.page >= S.tp ? "disabled" : "") + ' onclick="goP(' + (S.page + 1) + ')">Siguiente \u2192</button></div>';
+  h += '<button ' + (S.page >= S.tp ? "disabled" : "") + ' onclick="goP(' + (S.page + 1) + ')">Siguiente →</button></div>';
   c.innerHTML = h;
 }
 
@@ -652,8 +762,8 @@ function pvImg(idx) { S.pvImg = S.posts[idx].images || []; S.pvIdx = 0; renderPv
 function renderPv() {
   if (!S.pvImg.length) return; var src = S.pvImg[S.pvIdx];
   var d = document.createElement("div"); d.className = "ipo"; d.id = "pvO";
-  d.innerHTML = '<img src="' + escH(src) + '" alt="Imagen"><button class="ipc" onclick="closePv()">\u2715</button>' +
-    (S.pvImg.length > 1 ? '<button class="ipn pv" onclick="pvNav(-1)">\u2190</button><button class="ipn nx" onclick="pvNav(1)">\u2192</button><div class="ipk">' + (S.pvIdx + 1) + ' / ' + S.pvImg.length + '</div>' : '');
+  d.innerHTML = '<img src="' + escH(src) + '" alt="Imagen"><button class="ipc" onclick="closePv()">✕</button>' +
+    (S.pvImg.length > 1 ? '<button class="ipn pv" onclick="pvNav(-1)">←</button><button class="ipn nx" onclick="pvNav(1)">→</button><div class="ipk">' + (S.pvIdx + 1) + ' / ' + S.pvImg.length + '</div>' : '');
   document.body.appendChild(d);
 }
 function pvNav(dir) { S.pvIdx = (S.pvIdx + dir + S.pvImg.length) % S.pvImg.length; var o = document.getElementById("pvO"); if (o) o.remove(); renderPv(); }
@@ -671,41 +781,44 @@ async function doFetchMeta(urlField, prvId, titleField) {
     S.fetchedImage = r.meta.image || "";
     if (prv) {
       if (r.meta.image) {
-        prv.innerHTML = '<img src="' + escH(r.meta.image) + '" alt="Vista previa"><button class="ipl" onclick="clearFetchPreview(\'' + prvId + '\')">\u2715 Quitar</button>';
+        prv.innerHTML = '<img src="' + escH(r.meta.image) + '" alt="Vista previa"><button class="ipl" onclick="clearFetchPreview(\'' + prvId + '\')">✕ Quitar</button>';
       } else {
-        prv.innerHTML = '<div class="iph">\u{1F4DD} No se encontró imagen en esta URL.<br>El post se guardará sin vista previa.</div>';
+        prv.innerHTML = '<div class="iph">📝 No se encontró imagen en esta URL.<br>El post se guardará sin vista previa.</div>';
       }
     }
     if (titleField) {
       var tf = document.getElementById(titleField);
       if (tf && !tf.value.trim() && r.meta.title) tf.value = r.meta.title;
     }
-    toast(r.meta.image ? "\u2705 Imagen encontrada" : "\u2139\uFE0F Sin imagen detectada", r.meta.image ? "success" : "info");
+    toast(r.meta.image ? "✅ Imagen encontrada" : "ℹ️ Sin imagen detectada", r.meta.image ? "success" : "info");
   } else {
-    if (prv) prv.innerHTML = '<div class="iph">\u26A0\uFE0F No se pudo obtener la vista previa</div>';
+    if (prv) prv.innerHTML = '<div class="iph">⚠️ No se pudo obtener la vista previa</div>';
     toast("No se pudo obtener la vista previa", "error");
   }
 }
 
 function clearFetchPreview(prvId) {
   var prv = document.getElementById(prvId);
-  if (prv) prv.innerHTML = '<div class="iph">\u{1F4F7} La imagen se obtendrá automáticamente del enlace</div>';
+  if (prv) prv.innerHTML = '<div class="iph">📷 La imagen se obtendrá automáticamente del enlace</div>';
   S.fetchedImage = "";
 }
 
 // ============ ADD POST ============
 function openAdd() {
   S.fetchedImage = "";
+  S.uploadedFile = null;
+  S.uploadedUrl = "";
   var d = document.createElement("div"); d.id = "addM"; d.className = "mo";
-  d.innerHTML = '<div class="md"><div class="mh"><h3>\u2795 Agregar Post</h3><button class="mc" onclick="clM(\'addM\')">\u2715</button></div>' +
+  d.innerHTML = '<div class="md"><div class="mh"><h3>➕ Agregar Post</h3><button class="mc" onclick="clM(\'addM\')">✕</button></div>' +
     '<div class="mb">' +
-    '<div class="fg"><label class="fl">URL del post de Facebook</label><div style="display:flex;gap:8px;"><input type="url" id="aUrl" class="fi" placeholder="https://www.facebook.com/..." style="flex:1"><button class="btn bg bs" onclick="doFetchMeta(\'aUrl\',\'aPrv\',\'aTitle\')" style="white-space:nowrap">\u{1F50D} Vista previa</button></div></div>' +
-    '<div id="aPrv" class="iprv"><div class="iph">\u{1F4F7} La imagen se obtendrá automáticamente del enlace</div></div>' +
+    '<div class="fg"><label class="fl">URL del post de Facebook</label><div style="display:flex;gap:8px;"><input type="url" id="aUrl" class="fi" placeholder="https://www.facebook.com/..." style="flex:1"><button class="btn bg bs" onclick="doFetchMeta(\'aUrl\',\'aPrv\',\'aTitle\')" style="white-space:nowrap">🔍 Vista previa</button></div></div>' +
+    '<div id="aPrv" class="iprv"><div class="iph">📷 La imagen se obtendrá automáticamente del enlace</div></div>' +
+    '<div class="fg"><label class="fl">O subir imagen desde tu dispositivo</label>' + _renderUploadArea("aFile", "") + '</div>' +
     '<div class="fg"><label class="fl">Texto del post</label><textarea id="aText" class="fi" rows="4" placeholder="Copia el texto del post aquí"></textarea></div>' +
     '<div class="fg"><label class="fl">Fecha del post</label><input type="date" id="aDate" class="fi"></div>' +
     '<div class="fg"><label class="fl">Título / Página</label><input type="text" id="aTitle" class="fi" placeholder="Nombre de la página o título"></div>' +
-    '<div class="fg"><label class="fl">Categoría</label><select id="aCat" class="fi"><option value="auto">\u{1F3AF} Automático (según palabras clave)</option><option value="historico">Histórico</option><option value="cultural">Cultural</option><option value="social">Social</option><option value="sin_clasificar">Sin Clasificar</option></select></div>' +
-    '</div><div class="mf"><button class="btn bo" onclick="clM(\'addM\')">Cancelar</button><button class="btn bp" id="aBtn" onclick="doAdd()" style="width:auto">\u{1F4BE} Guardar</button></div></div>';
+    '<div class="fg"><label class="fl">Categoría</label><select id="aCat" class="fi"><option value="auto">🎯 Automático (según palabras clave)</option><option value="historico">Histórico</option><option value="cultural">Cultural</option><option value="social">Social</option><option value="sin_clasificar">Sin Clasificar</option></select></div>' +
+    '</div><div class="mf"><button class="btn bo" onclick="clM(\'addM\')">Cancelar</button><button class="btn bp" id="aBtn" onclick="doAdd()" style="width:auto">💾 Guardar</button></div></div>';
   document.body.appendChild(d); setTimeout(function () { d.classList.add("ac"); }, 50);
 }
 
@@ -731,6 +844,15 @@ async function doAdd() {
       } catch (e) { /* silencioso */ }
     }
 
+    // Subir imagen de archivo si existe
+    if (S.uploadedFile) {
+      b.textContent = "Subiendo imagen...";
+      var uploadedUrl = await _uploadImageToStorage(S.uploadedFile, "new_" + Date.now());
+      if (uploadedUrl) {
+        imgs = [uploadedUrl]; // La imagen subida tiene prioridad
+      }
+    }
+
     var docRef = await db.collection("posts").add({
       url: url, postText: txt, postDate: dt, pageTitle: ttl,
       category: cat, addedBy: S.user.name,
@@ -738,12 +860,12 @@ async function doAdd() {
       images: imgs
     });
 
-    toast("\u2705 Post agregado — Clasificación: " + cat, "success");
-    clM("addM"); S.fetchedImage = "";
-    onPostAdded({ id: docRef.id, category: cat }, url, txt, dt, ttl, imgs, selCat);
+    _audit("create_post", "Post creado: " + ttl + " (" + cat + ")");
+    toast("✅ Post agregado — Clasificación: " + cat, "success");
+    clM("addM"); S.fetchedImage = ""; S.uploadedFile = null; S.uploadedUrl = "";
   } catch (e) {
     toast("Error: " + e.message, "error");
-    b.disabled = false; b.textContent = "\u{1F4BE} Guardar";
+    b.disabled = false; b.textContent = "💾 Guardar";
   }
 }
 
@@ -753,17 +875,20 @@ function openEditPost(postId) {
   if (!post) { toast("Post no encontrado", "error"); return; }
   S.editPostData = post;
   S.fetchedImage = post.images && post.images.length > 0 ? post.images[0] : "";
+  S.uploadedFile = null;
+  S.uploadedUrl = "";
   var currentImg = S.fetchedImage;
   var d = document.createElement("div"); d.id = "editPM"; d.className = "mo";
-  d.innerHTML = '<div class="md"><div class="mh"><h3>\u270F\uFE0F Editar Post</h3><button class="mc" onclick="clM(\'editPM\')">\u2715</button></div>' +
+  d.innerHTML = '<div class="md"><div class="mh"><h3>✏️ Editar Post</h3><button class="mc" onclick="clM(\'editPM\')">✕</button></div>' +
     '<div class="mb">' +
-    '<div class="fg"><label class="fl">URL del post de Facebook</label><div style="display:flex;gap:8px;"><input type="url" id="eUrl" class="fi" value="' + escH(post.url) + '" placeholder="https://www.facebook.com/..." style="flex:1"><button class="btn bg bs" onclick="doFetchMeta(\'eUrl\',\'ePrv\',\'eTitle\')" style="white-space:nowrap">\u{1F50D} Vista previa</button></div></div>' +
-    '<div id="ePrv" class="iprv">' + (currentImg ? '<img src="' + escH(currentImg) + '" alt="Vista previa"><button class="ipl" onclick="clearFetchPreview(\'ePrv\')">\u2715 Quitar</button>' : '<div class="iph">\u{1F4F7} La imagen se obtendrá automáticamente del enlace</div>') + '</div>' +
+    '<div class="fg"><label class="fl">URL del post de Facebook</label><div style="display:flex;gap:8px;"><input type="url" id="eUrl" class="fi" value="' + escH(post.url) + '" placeholder="https://www.facebook.com/..." style="flex:1"><button class="btn bg bs" onclick="doFetchMeta(\'eUrl\',\'ePrv\',\'eTitle\')" style="white-space:nowrap">🔍 Vista previa</button></div></div>' +
+    '<div id="ePrv" class="iprv">' + (currentImg ? '<img src="' + escH(currentImg) + '" alt="Vista previa"><button class="ipl" onclick="clearFetchPreview(\'ePrv\')">✕ Quitar</button>' : '<div class="iph">📷 La imagen se obtendrá automáticamente del enlace</div>') + '</div>' +
+    '<div class="fg"><label class="fl">O subir imagen desde tu dispositivo</label>' + _renderUploadArea("eFile", "") + '</div>' +
     '<div class="fg"><label class="fl">Texto del post</label><textarea id="eText" class="fi" rows="4" placeholder="Copia el texto del post aquí">' + escH(post.postText || "") + '</textarea></div>' +
     '<div class="fg"><label class="fl">Fecha del post</label><input type="date" id="eDate" class="fi" value="' + escH(post.postDate || "") + '"></div>' +
     '<div class="fg"><label class="fl">Título / Página</label><input type="text" id="eTitle" class="fi" value="' + escH(post.pageTitle || "") + '" placeholder="Nombre de la página o título"></div>' +
     '<div class="fg"><label class="fl">Categoría</label><select id="eCat" class="fi"><option value="historico"' + (post.category === "historico" ? " selected" : "") + '>Histórico</option><option value="cultural"' + (post.category === "cultural" ? " selected" : "") + '>Cultural</option><option value="social"' + (post.category === "social" ? " selected" : "") + '>Social</option><option value="sin_clasificar"' + (post.category === "sin_clasificar" ? " selected" : "") + '>Sin Clasificar</option></select></div>' +
-    '</div><div class="mf"><button class="btn bo" onclick="clM(\'editPM\')">Cancelar</button><button class="btn bp" id="eBtn" onclick="doEditPost(\'' + postId + '\')" style="width:auto">\u{1F4BE} Guardar Cambios</button></div></div>';
+    '</div><div class="mf"><button class="btn bo" onclick="clM(\'editPM\')">Cancelar</button><button class="btn bp" id="eBtn" onclick="doEditPost(\'' + postId + '\')" style="width:auto">💾 Guardar Cambios</button></div></div>';
   document.body.appendChild(d); setTimeout(function () { d.classList.add("ac"); }, 50);
 }
 
@@ -778,16 +903,55 @@ async function doEditPost(postId) {
   var b = document.getElementById("eBtn"); b.disabled = true; b.textContent = "Guardando...";
 
   try {
+    // Subir imagen de archivo si existe
+    if (S.uploadedFile) {
+      b.textContent = "Subiendo imagen...";
+      var uploadedUrl = await _uploadImageToStorage(S.uploadedFile, postId);
+      if (uploadedUrl) {
+        imgs = [uploadedUrl];
+      }
+    }
+
     await db.collection("posts").doc(postId).update({
       url: url, postText: txt, postDate: dt, pageTitle: ttl, category: cat, images: imgs
     });
-    toast("\u2705 Post actualizado", "success");
-    clM("editPM"); S.fetchedImage = ""; S.editPostData = null;
-    onPostUpdated(postId, url, txt, dt, ttl, cat, imgs);
+    _audit("update_post", "Post editado: " + ttl);
+    toast("✅ Post actualizado", "success");
+    clM("editPM"); S.fetchedImage = ""; S.editPostData = null; S.uploadedFile = null; S.uploadedUrl = "";
   } catch (e) {
     toast("Error: " + e.message, "error");
-    b.disabled = false; b.textContent = "\u{1F4BE} Guardar Cambios";
+    b.disabled = false; b.textContent = "💾 Guardar Cambios";
   }
+}
+
+// ============ CSV EXPORT ============
+function exportCSV() {
+  if (S.allPosts.length === 0) { toast("No hay posts para exportar", "error"); return; }
+
+  var headers = ["Fecha Post", "Titulo", "Texto", "URL", "Categoria", "Agregado Por", "Fecha Creacion"];
+  var rows = S.allPosts.map(function (p) {
+    return [
+      p.postDate || "",
+      '"' + (p.pageTitle || "").replace(/"/g, '""') + '"',
+      '"' + (p.postText || "").replace(/"/g, '""').replace(/\n/g, " ") + '"',
+      '"' + (p.url || "") + '"',
+      _catLabel(p.category),
+      '"' + (p.addedBy || "").replace(/"/g, '""') + '"',
+      p.createdAt ? (typeof p.createdAt === "string" ? p.createdAt : "") : ""
+    ].join(",");
+  });
+
+  var csv = headers.join(",") + "\n" + rows.join("\n");
+  var blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+  var link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "ruletero222_posts_" + new Date().toISOString().slice(0, 10) + ".csv";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(link.href);
+  _audit("export_csv", "Exportados " + S.allPosts.length + " posts a CSV");
+  toast("✅ CSV exportado (" + S.allPosts.length + " posts)", "success");
 }
 
 // ============ DASHBOARD ============
@@ -845,36 +1009,36 @@ function computeDash() {
 }
 
 function rDash() {
-  if (!S.dashData) return '<div class="do"><div class="dh"><h2>\u{1F4CA} Dashboard</h2><button class="hbn" onclick="togDash()">\u2715 Cerrar</button></div><div class="dc" style="display:flex;justify-content:center;padding:60px;"><div class="sp" style="width:40px;height:40px;"></div></div></div>';
+  if (!S.dashData) return '<div class="do"><div class="dh"><h2>📊 Dashboard</h2><button class="hbn" onclick="togDash()">✕ Cerrar</button></div><div class="dc" style="display:flex;justify-content:center;padding:60px;"><div class="sp" style="width:40px;height:40px;"></div></div></div>';
   var d = S.dashData;
-  var h = '<div class="do"><div class="dh"><h2>\u{1F4CA} Dashboard — Análisis de Contenido</h2><button class="hbn" onclick="togDash()">\u2715 Cerrar</button></div><div class="dc">';
+  var h = '<div class="do"><div class="dh"><h2>📊 Dashboard — Análisis de Contenido</h2><button class="hbn" onclick="togDash()">✕ Cerrar</button></div><div class="dc">';
 
   h += '<div class="kg"><div class="kc"><div class="kv">' + d.kpis.total + '</div><div class="kl">Total Publicaciones</div></div><div class="kc"><div class="kv">' + d.kpis.wImg + '</div><div class="kl">Con Imágenes</div></div><div class="kc"><div class="kv">' + d.kpis.uc + '</div><div class="kl">Contribuidores</div></div><div class="kc"><div class="kv">' + d.kpis.cc + '</div><div class="kl">Categorías Activas</div></div></div>';
 
   h += '<div class="cg">';
-  h += '<div class="cc"><h4>\u{1F4CA} Distribución por Categoría</h4><div class="dnt"><div class="dn" style="background:conic-gradient(' + d.cats.map(function (c, i) { var off = d.cats.slice(0, i).reduce(function (s, x) { return s + x.value; }, 0); return c.color + ' ' + (off / d.kpis.total * 360) + 'deg ' + (off + c.value) / d.kpis.total * 360 + 'deg'; }).join(",") + ')"><div class="dnc"><div class="dnv">' + d.kpis.total + '</div><div class="dnl">Total</div></div></div><div class="dg">';
+  h += '<div class="cc"><h4>📊 Distribución por Categoría</h4><div class="dnt"><div class="dn" style="background:conic-gradient(' + d.cats.map(function (c, i) { var off = d.cats.slice(0, i).reduce(function (s, x) { return s + x.value; }, 0); return c.color + ' ' + (off / d.kpis.total * 360) + 'deg ' + (off + c.value) / d.kpis.total * 360 + 'deg'; }).join(",") + ')"><div class="dnc"><div class="dnv">' + d.kpis.total + '</div><div class="dnl">Total</div></div></div><div class="dg">';
   for (var i = 0; i < d.cats.length; i++) { h += '<div class="li"><div class="ld" style="background:' + d.cats[i].color + '"></div>' + d.cats[i].name + '<span class="lv">' + d.cats[i].value + '</span></div>'; }
   h += '</div></div></div>';
 
-  h += '<div class="cc"><h4>\u{1F4C5} Actividad por Día</h4>';
+  h += '<div class="cc"><h4>📅 Actividad por Día</h4>';
   var mx = Math.max.apply(null, d.days.map(function (x) { return x.c; })) || 1;
   for (var i = 0; i < d.days.length; i++) { h += '<div class="br"><div class="bl">' + d.days[i].d + '</div><div class="bt"><div class="bf" style="width:' + Math.round(d.days[i].c / mx * 100) + '%;background:' + (d.days[i].c === mx ? "var(--g)" : "var(--n)") + ';">' + d.days[i].c + '</div></div></div>'; }
   h += '</div></div>';
 
   h += '<div class="cg">';
-  h += '<div class="cc"><h4>\u{1F4C8} Tendencia Mensual</h4>';
+  h += '<div class="cc"><h4>📈 Tendencia Mensual</h4>';
   if (d.months.length) {
     var mmx = 0; for (var i = 0; i < d.months.length; i++) { var t = d.months[i].historico + d.months[i].cultural + d.months[i].social + d.months[i].sin_clasificado; if (t > mmx) mmx = t; } mmx = mmx || 1;
     for (var i = 0; i < d.months.length; i++) { var t = d.months[i].historico + d.months[i].cultural + d.months[i].social + d.months[i].sin_clasificado; h += '<div class="br"><div class="bl">' + d.months[i].month + '</div><div class="bt"><div class="bf" style="width:' + Math.round(t / mmx * 100) + '%;background:var(--n);">' + t + '</div></div></div>'; }
   } else { h += '<p style="color:var(--m);font-size:13px;">Sin datos suficientes</p>'; }
   h += '</div>';
 
-  h += '<div class="cc"><h4>\u{1F3C6} Top Contribuidores</h4>';
+  h += '<div class="cc"><h4>🏆 Top Contribuidores</h4>';
   for (var i = 0; i < d.topC.length; i++) { h += '<div class="br"><div class="bl">' + escH(d.topC[i].name) + '</div><div class="bt"><div class="bf" style="width:' + Math.round(d.topC[i].count / (d.topC[0].count || 1) * 100) + '%;background:var(--g);">' + d.topC[i].count + '</div></div></div>'; }
   h += '</div></div>';
 
   if (d.insights && d.insights.length) {
-    h += '<h3 style="font-size:16px;font-weight:700;color:var(--n);margin-bottom:16px;">\u{1F4A1} Insights Estratégicos</h3><div class="ig">';
+    h += '<h3 style="font-size:16px;font-weight:700;color:var(--n);margin-bottom:16px;">💡 Insights Estratégicos</h3><div class="ig">';
     for (var i = 0; i < d.insights.length; i++) { var ins = d.insights[i]; h += '<div class="ic2 ' + ins.type + '"><div class="it2">' + ins.title + '</div><div class="ix">' + ins.text + '</div></div>'; }
     h += '</div>';
   }
@@ -902,11 +1066,11 @@ async function loadU() {
 }
 
 function rUsers() {
-  if (!S.users) return '<div class="uo"><div class="dh"><h2>\u{1F465} Gestión de Usuarios</h2><button class="hbn" onclick="togUsers()">\u2715 Cerrar</button></div><div class="dc" style="display:flex;justify-content:center;padding:60px;"><div class="sp" style="width:40px;height:40px;"></div></div></div>';
-  var h = '<div class="uo"><div class="dh"><h2>\u{1F465} Gestión de Usuarios</h2><div style="display:flex;align-items:center;gap:16px;"><button class="btn bg bs" onclick="openAddU()">\u2795 Nuevo Usuario</button><button class="hbn" onclick="togUsers()">\u2715 Cerrar</button></div></div><div class="dc"><table class="ut"><thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>';
+  if (!S.users) return '<div class="uo"><div class="dh"><h2>👥 Gestión de Usuarios</h2><button class="hbn" onclick="togUsers()">✕ Cerrar</button></div><div class="dc" style="display:flex;justify-content:center;padding:60px;"><div class="sp" style="width:40px;height:40px;"></div></div></div>';
+  var h = '<div class="uo"><div class="dh"><h2>👥 Gestión de Usuarios</h2><div style="display:flex;align-items:center;gap:16px;"><button class="btn bg bs" onclick="openAddU()">➕ Nuevo Usuario</button><button class="hbn" onclick="togUsers()">✕ Cerrar</button></div></div><div class="dc"><table class="ut"><thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>';
   for (var i = 0; i < S.users.length; i++) {
     var u = S.users[i];
-    h += '<tr><td>' + escH(u.name) + '</td><td>' + escH(u.email) + '</td><td><span class="rb ' + _roleBadgeCls(u.role) + '">' + _roleIcon(u.role) + ' ' + _roleLabel(u.role) + '</span></td><td class="' + (u.active ? "sa" : "si2") + '">' + (u.active ? "\u2705 Activo" : "\u274C Inactivo") + '</td><td><button class="btn bo bs" onclick="openEditU(\'' + u.id + '\')">\u270F\uFE0F</button> <button class="btn bw bs" onclick="sendResetEmail(\'' + u.id + '\')" title="Enviar email de reseteo de contraseña">\u{1F4E7}</button> ' + (u.role !== "admin" || S.users.filter(function(x){return x.role==="admin";}).length > 1 ? '<button class="btn bd bs" onclick="togAct(\'' + u.id + '\',' + !u.active + ')">' + (u.active ? "Desactivar" : "Activar") + '</button> <button class="btn bd bs" onclick="delU(\'' + u.id + '\')">\u{1F5D1}</button>' : "") + '</td></tr>';
+    h += '<tr><td>' + escH(u.name) + '</td><td>' + escH(u.email) + '</td><td><span class="rb ' + _roleBadgeCls(u.role) + '">' + _roleIcon(u.role) + ' ' + _roleLabel(u.role) + '</span></td><td class="' + (u.active ? "sa" : "si2") + '">' + (u.active ? "✅ Activo" : "❌ Inactivo") + '</td><td><button class="btn bo bs" onclick="openEditU(\'' + u.id + '\')">✏️</button> <button class="btn bw bs" onclick="sendResetEmail(\'' + u.id + '\')" title="Enviar email de reseteo de contraseña">📨</button> ' + (u.role !== "admin" || S.users.filter(function (x) { return x.role === "admin"; }).length > 1 ? '<button class="btn bd bs" onclick="togAct(\'' + u.id + '\',' + !u.active + ')">' + (u.active ? "Desactivar" : "Activar") + '</button> <button class="btn bd bs" onclick="delU(\'' + u.id + '\')">🗑</button>' : "") + '</td></tr>';
   }
   h += '</tbody></table></div></div>';
   return h;
@@ -914,14 +1078,14 @@ function rUsers() {
 
 function openAddU() {
   var d = document.createElement("div"); d.id = "addUM"; d.className = "mo";
-  d.innerHTML = '<div class="md"><div class="mh"><h3>\u2795 Nuevo Usuario</h3><button class="mc" onclick="clM(\'addUM\')">\u2715</button></div>' +
+  d.innerHTML = '<div class="md"><div class="mh"><h3>➕ Nuevo Usuario</h3><button class="mc" onclick="clM(\'addUM\')">✕</button></div>' +
     '<div class="mb">' +
     '<div class="fg"><label class="fl">Nombre completo</label><input type="text" id="nuName" class="fi" placeholder="Ej: Juan Pérez"></div>' +
     '<div class="fg"><label class="fl">Correo electrónico</label><input type="email" id="nuEmail" class="fi" placeholder="Ej: juan@gmail.com"></div>' +
-    '<div class="fg"><label class="fl">Contraseña</label><div class="pw"><input type="password" id="nuPass" class="fi" placeholder="Mínimo 6 caracteres"><button type="button" class="pt" onclick="togglePw(\'nuPass\',this)">\u{1F441}</button></div></div>' +
-    '<div class="fg"><label class="fl">Rol</label><select id="nuRole" class="fi"><option value="viewer">\u{1F441} Visualizador</option><option value="gestionador">\u270F\uFE0F Gestionador</option><option value="admin">\u{1F6E1} Administrador</option></select></div>' +
-    '<div style="margin-top:8px;padding:10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:11px;color:#1e40af;line-height:1.5;"><strong>\u{1F4A1} Importante:</strong> Usa un correo electrónico real. El usuario podrá resetear su contraseña recibiendo un email a esta dirección.</div>' +
-    '</div><div class="mf"><button class="btn bo" onclick="clM(\'addUM\')">Cancelar</button><button class="btn bp" id="nuBtn" onclick="doAddU()" style="width:auto">\u{1F4BE} Crear</button></div></div>';
+    '<div class="fg"><label class="fl">Contraseña</label><div class="pw"><input type="password" id="nuPass" class="fi" placeholder="Mínimo 6 caracteres"><button type="button" class="pt" onclick="togglePw(\'nuPass\',this)">👁</button></div></div>' +
+    '<div class="fg"><label class="fl">Rol</label><select id="nuRole" class="fi"><option value="viewer">👁 Visualizador</option><option value="gestionador">✏️ Gestionador</option><option value="admin">🛡 Administrador</option></select></div>' +
+    '<div style="margin-top:8px;padding:10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:11px;color:#1e40af;line-height:1.5;"><strong>💡 Importante:</strong> Usa un correo electrónico real. El usuario podrá resetear su contraseña recibiendo un email a esta dirección.</div>' +
+    '</div><div class="mf"><button class="btn bo" onclick="clM(\'addUM\')">Cancelar</button><button class="btn bp" id="nuBtn" onclick="doAddU()" style="width:auto">💾 Crear</button></div></div>';
   document.body.appendChild(d); setTimeout(function () { d.classList.add("ac"); }, 50);
 }
 
@@ -937,27 +1101,23 @@ async function doAddU() {
   var b = document.getElementById("nuBtn"); b.disabled = true;
 
   try {
-    // Verificar que no exista el email
     var existing = await db.collection("users").where("email", "==", e).limit(1).get();
     if (!existing.empty) { toast("Ya existe un usuario con ese correo", "error"); b.disabled = false; return; }
 
-    // Crear usuario en Firebase Auth usando instancia secundaria
     var secondaryApp = firebase.initializeApp(firebase.app().options, "Secondary" + Date.now());
     var cred = await secondaryApp.auth().createUserWithEmailAndPassword(e, p);
     var newUid = cred.user.uid;
 
-    // Crear documento en Firestore
     await db.collection("users").doc(newUid).set({
       email: e, name: n, role: r, active: true,
       createdAt: new Date().toISOString(), uid: newUid
     });
 
-    // Cerrar sesión en instancia secundaria
     await secondaryApp.auth().signOut();
-    // Eliminar la app secundaria
     secondaryApp.delete().catch(function () { });
 
-    toast("\u2705 Usuario creado", "success");
+    _audit("create_user", "Usuario creado: " + n + " (" + e + ") - Rol: " + _roleLabel(r));
+    toast("✅ Usuario creado", "success");
     clM("addUM");
     loadU();
   } catch (err) {
@@ -971,13 +1131,13 @@ async function doAddU() {
 function openEditU(uid) {
   var u = S.users.find(function (x) { return x.id === uid; }); if (!u) return;
   var d = document.createElement("div"); d.id = "editUM"; d.className = "mo";
-  d.innerHTML = '<div class="md"><div class="mh"><h3>\u270F\uFE0F Editar Usuario</h3><button class="mc" onclick="clM(\'editUM\')">\u2715</button></div>' +
+  d.innerHTML = '<div class="md"><div class="mh"><h3>✏️ Editar Usuario</h3><button class="mc" onclick="clM(\'editUM\')">✕</button></div>' +
     '<div class="mb">' +
     '<div class="fg"><label class="fl">Nombre</label><input type="text" id="euName" class="fi" value="' + escH(u.name) + '"></div>' +
     '<div class="fg"><label class="fl">Correo electrónico</label><input type="email" id="euEmail" class="fi" value="' + escH(u.email) + '" readonly style="background:#f1f5f9;cursor:not-allowed;"><div style="font-size:11px;color:var(--m);margin-top:4px;">El correo no se puede cambiar (es el identificador de la cuenta)</div></div>' +
-    '<div class="fg"><label class="fl">Contraseña</label><div style="padding:10px 0;"><button type="button" class="btn bw bs" onclick="sendResetEmail(\'' + uid + '\')">\u{1F4E7} Enviar email de reseteo</button><span style="display:block;margin-top:6px;font-size:11px;color:var(--m);">Se enviará un correo a <strong>' + escH(u.email) + '</strong> para que el usuario cambie su contraseña.</span></div></div>' +
-    '<div class="fg"><label class="fl">Rol</label><select id="euRole" class="fi"><option value="viewer"' + (u.role === "viewer" ? " selected" : "") + '>\u{1F441} Visualizador</option><option value="gestionador"' + (u.role === "gestionador" ? " selected" : "") + '>\u270F\uFE0F Gestionador</option><option value="admin"' + (u.role === "admin" ? " selected" : "") + '>\u{1F6E1} Administrador</option></select></div>' +
-    '</div><div class="mf"><button class="btn bo" onclick="clM(\'editUM\')">Cancelar</button><button class="btn bp" onclick="doEditU(\'' + uid + '\')" style="width:auto">\u{1F4BE} Guardar</button></div></div>';
+    '<div class="fg"><label class="fl">Contraseña</label><div style="padding:10px 0;"><button type="button" class="btn bw bs" onclick="sendResetEmail(\'' + uid + '\')">📨 Enviar email de reseteo</button><span style="display:block;margin-top:6px;font-size:11px;color:var(--m);">Se enviará un correo a <strong>' + escH(u.email) + '</strong> para que el usuario cambie su contraseña.</span></div></div>' +
+    '<div class="fg"><label class="fl">Rol</label><select id="euRole" class="fi"><option value="viewer"' + (u.role === "viewer" ? " selected" : "") + '>👁 Visualizador</option><option value="gestionador"' + (u.role === "gestionador" ? " selected" : "") + '>✏️ Gestionador</option><option value="admin"' + (u.role === "admin" ? " selected" : "") + '>🛡 Administrador</option></select></div>' +
+    '</div><div class="mf"><button class="btn bo" onclick="clM(\'editUM\')">Cancelar</button><button class="btn bp" onclick="doEditU(\'' + uid + '\')" style="width:auto">💾 Guardar</button></div></div>';
   document.body.appendChild(d); setTimeout(function () { d.classList.add("ac"); }, 50);
 }
 
@@ -987,7 +1147,8 @@ async function doEditU(uid) {
 
   try {
     await db.collection("users").doc(uid).update({ name: n, role: r });
-    toast("\u2705 Usuario actualizado", "success");
+    _audit("update_user", "Usuario editado: " + n + " - Rol: " + _roleLabel(r));
+    toast("✅ Usuario actualizado", "success");
     clM("editUM"); loadU();
   } catch (e) { toast("Error: " + e.message, "error"); }
 }
@@ -995,7 +1156,8 @@ async function doEditU(uid) {
 async function togAct(uid, act) {
   try {
     await db.collection("users").doc(uid).update({ active: act });
-    toast(act ? "\u2705 Activado" : "\u{1F534} Desactivado", "success");
+    _audit("toggle_user", "Usuario " + (act ? "activado" : "desactivado") + ": " + uid);
+    toast(act ? "✅ Activado" : "🔴 Desactivado", "success");
     loadU();
   } catch (e) { toast("Error: " + e.message, "error"); }
 }
@@ -1004,7 +1166,8 @@ async function delU(uid) {
   if (!confirm("¿Eliminar este usuario?")) return;
   try {
     await db.collection("users").doc(uid).delete();
-    toast("\u2705 Eliminado", "success");
+    _audit("delete_user", "Usuario eliminado: " + uid);
+    toast("✅ Eliminado", "success");
     loadU();
   } catch (e) { toast("Error: " + e.message, "error"); }
 }
@@ -1032,23 +1195,59 @@ async function loadSettings() {
 function rSettings() {
   var sd = S.settingsData || { logoUrl: S.logoUrl };
   var curLogo = sd.logoUrl || S.logoUrl || "";
-  var h = '<div class="so"><div class="dh"><h2>\u2699\uFE0F Configuración</h2><button class="hbn" onclick="togSettings()">\u2715 Cerrar</button></div><div class="sc">';
+  var h = '<div class="so"><div class="dh"><h2>⚙️ Configuración</h2><button class="hbn" onclick="togSettings()">✕ Cerrar</button></div><div class="sc">';
 
-  h += '<div class="slg"><h4>\u{1F3A8} Logo de la Aplicación</h4><p>Ingresa la URL de tu logo para reemplazar la letra "R". Se recomienda una imagen cuadrada (PNG con fondo transparente funciona mejor).</p>';
+  h += '<div class="slg"><h4>🎨 Logo de la Aplicación</h4><p>Ingresa la URL de tu logo para reemplazar la letra "R". Se recomienda una imagen cuadrada (PNG con fondo transparente funciona mejor).</p>';
   h += '<div class="sprv"><div>' + (curLogo ? '<div class="lo"><img src="' + escH(curLogo) + '" alt="Logo"></div>' : logoHTML("lo", "lg")) + '</div><div>' + (curLogo ? '<div class="hl"><img src="' + escH(curLogo) + '" alt="Logo"></div>' : logoHTML("hl", "md")) + '</div><div>' + (curLogo ? '<div class="fl2"><img src="' + escH(curLogo) + '" alt="Logo"></div>' : logoHTML("fl2", "sm")) + '</div><div><div class="sprv-label">Vista previa: Login | Header | Footer</div></div></div>';
   h += '<div class="fg"><label class="fl">URL del Logo</label><input type="url" id="sLogoUrl" class="fi" value="' + escH(curLogo) + '" placeholder="https://ejemplo.com/mi-logo.png"></div>';
-  h += '<div style="display:flex;gap:10px;"><button class="btn bp" onclick="saveLogo()" style="width:auto;flex:1">\u{1F4BE} Guardar Logo</button>' + (curLogo ? '<button class="btn bd" onclick="removeLogo()" style="width:auto">\u{1F5D1} Quitar Logo</button>' : '') + '</div>';
-  h += '<div style="margin-top:12px;padding:12px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;font-size:12px;color:#92400e;"><strong>\u{1F4A1} Tip:</strong> Puedes subir tu logo a <a href="https://imgur.com/upload" target="_blank" style="color:var(--n);font-weight:600;">Imgur</a> o <a href="https://drive.google.com" target="_blank" style="color:var(--n);font-weight:600;">Google Drive</a> y pegar el enlace directo aquí.<br><br>Para Google Drive usa el formato:<br><code style="font-size:11px;background:#fef3c7;padding:2px 6px;border-radius:4px;">https://drive.google.com/uc?export=view&id=FILE_ID</code></div>';
+  h += '<div style="display:flex;gap:10px;"><button class="btn bp" onclick="saveLogo()" style="width:auto;flex:1">💾 Guardar Logo</button>' + (curLogo ? '<button class="btn bd" onclick="removeLogo()" style="width:auto">🗑 Quitar Logo</button>' : '') + '</div>';
+  h += '<div style="margin-top:12px;padding:12px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;font-size:12px;color:#92400e;"><strong>💡 Tip:</strong> Puedes subir tu logo a <a href="https://imgur.com/upload" target="_blank" style="color:var(--n);font-weight:600;">Imgur</a> o <a href="https://drive.google.com" target="_blank" style="color:var(--n);font-weight:600;">Google Drive</a> y pegar el enlace directo aquí.<br><br>Para Google Drive usa el formato:<br><code style="font-size:11px;background:#fef3c7;padding:2px 6px;border-radius:4px;">https://drive.google.com/uc?export=view&id=FILE_ID</code></div>';
   h += '</div>';
 
-  h += '<div class="slg"><h4>\u{1F4CB} Información del Sistema</h4><div style="font-size:13px;color:var(--m);line-height:1.8;">';
+  h += '<div class="slg"><h4>📋 Información del Sistema</h4><div style="font-size:13px;color:var(--m);line-height:1.8;">';
   h += '<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--bd);padding:6px 0;"><span>Aplicación</span><strong style="color:var(--n)">RULETERO 222</strong></div>';
   h += '<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--bd);padding:6px 0;"><span>Plataforma</span><strong style="color:var(--n)">GitHub Pages + Firebase</strong></div>';
-  h += '<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--bd);padding:6px 0;"><span>Versión</span><strong style="color:var(--n)">6.0</strong></div>';
+  h += '<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--bd);padding:6px 0;"><span>Versión</span><strong style="color:var(--n)">7.0</strong></div>';
+  h += '<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--bd);padding:6px 0;"><span>Modo oscuro</span><strong style="color:' + (S.darkMode ? "#22c55e" : "#ef4444") + '">' + (S.darkMode ? "Activado" : "Desactivado") + '</strong></div>';
+  h += '<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--bd);padding:6px 0;"><span>Tiempo real</span><strong style="color:#22c55e;">Activado</strong></div>';
   h += '<div style="display:flex;justify-content:space-between;padding:6px 0;"><span>Estado del Logo</span><strong style="color:' + (curLogo ? "#22c55e" : "#ef4444") + '">' + (curLogo ? "Configurado" : "Sin configurar (letra R)") + '</strong></div>';
   h += '</div></div>';
+
+  // Audit log section (admin only)
+  if (S.user && S.user.role === "admin") {
+    h += '<div class="slg"><h4>📜 Registro de Auditoría (últimas 20 acciones)</h4><div id="auditLogContainer"><div style="text-align:center;padding:20px;"><div class="sp" style="width:24px;height:24px;margin:0 auto 8px;"></div>Cargando...</div></div></div>';
+  }
+
   h += '</div></div>';
   return h;
+}
+
+async function loadAuditLog() {
+  var container = document.getElementById("auditLogContainer");
+  if (!container) return;
+  try {
+    var snapshot = await db.collection("audit").orderBy("timestamp", "desc").limit(20).get();
+    if (snapshot.empty) {
+      container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--m);font-size:13px;">Sin registros de auditoría</div>';
+      return;
+    }
+    var h = '<table class="audit-table"><thead><tr><th>Fecha</th><th>Acción</th><th>Usuario</th><th>Detalles</th></tr></thead><tbody>';
+    snapshot.forEach(function (doc) {
+      var d = doc.data();
+      var date = d.timestamp ? new Date(d.timestamp.seconds * 1000).toLocaleString("es-MX") : "—";
+      var actionType = (d.action || "").split("_")[0];
+      var actionClass = "audit-other";
+      if (actionType === "create") actionClass = "audit-create";
+      else if (actionType === "update") actionClass = "audit-update";
+      else if (actionType === "delete") actionClass = "audit-delete";
+      else if (d.action === "login" || d.action === "logout") actionClass = "audit-login";
+      h += '<tr><td style="white-space:nowrap;">' + escH(date) + '</td><td><span class="audit-action ' + actionClass + '">' + escH(d.action) + '</span></td><td>' + escH(d.userName || "—") + '</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escH(d.details || "") + '">' + escH(d.details || "—") + '</td></tr>';
+    });
+    h += '</tbody></table>';
+    container.innerHTML = h;
+  } catch (e) {
+    container.innerHTML = '<div style="text-align:center;padding:20px;color:#ef4444;font-size:13px;">Error cargando auditoría: ' + escH(e.message) + '</div>';
+  }
 }
 
 async function saveLogo() {
@@ -1056,8 +1255,10 @@ async function saveLogo() {
   try {
     await db.collection("config").doc("app").set({ logoUrl: url }, { merge: true });
     S.logoUrl = url; localStorage.setItem("rt_lu", url);
-    toast("\u2705 Logo guardado correctamente", "success");
+    _audit("update_settings", "Logo actualizado");
+    toast("✅ Logo guardado correctamente", "success");
     renderApp();
+    setTimeout(loadAuditLog, 100);
   } catch (e) { toast("Error: " + e.message, "error"); }
 }
 
@@ -1066,8 +1267,10 @@ async function removeLogo() {
   try {
     await db.collection("config").doc("app").set({ logoUrl: "" }, { merge: true });
     S.logoUrl = ""; localStorage.setItem("rt_lu", "");
-    toast("\u2705 Logo eliminado", "success");
+    _audit("update_settings", "Logo eliminado");
+    toast("✅ Logo eliminado", "success");
     renderApp();
+    setTimeout(loadAuditLog, 100);
   } catch (e) { toast("Error: " + e.message, "error"); }
 }
 
@@ -1081,32 +1284,35 @@ function renderApp() {
 
   a.innerHTML = (S.showDash ? rDash() : "") + (S.showUsers ? rUsers() : "") + (S.showSettings ? rSettings() : "") +
     '<header class="hd"><div class="hi"><div class="hb">' + logoHTML("hl", "md") + '<div><div class="ht">RULETERO 222</div><div class="hs">La Ruta de los Poblanos</div></div></div><div class="ha">' +
-    '<button class="hbn" onclick="togDash()">\u{1F4CA} <span>Dashboard</span></button>' +
-    (ad ? '<button class="hbn gold" onclick="togUsers()">\u{1F465} <span>Usuarios</span></button><button class="hbn" onclick="togSettings()">\u2699\uFE0F <span>Config</span></button>' : '') +
+    '<button class="hbn" onclick="togDash()">📊 <span>Dashboard</span></button>' +
+    (ad ? '<button class="hbn gold" onclick="togUsers()">👥 <span>Usuarios</span></button><button class="hbn" onclick="togSettings()">⚙️ <span>Config</span></button>' : '') +
     '<div class="ui"><div class="uv ' + _roleUVCls(S.user.role) + '">' + _roleIcon(S.user.role) + '</div><div><div style="font-size:12px;font-weight:600">' + escH(S.user.name) + '</div><div style="font-size:10px;color:rgba(255,255,255,.5)">' + _roleLabel(S.user.role) + '</div></div></div>' +
-    '<button class="hbn" onclick="openChangeMyPw()">\u{1F511} <span>Contraseña</span></button>' +
-    '<button class="hbn" onclick="doLogout()">\u{1F6AA} <span>Salir</span></button></div></div><div class="hgl"></div></header>' +
+    '<button class="hbn" onclick="_toggleDarkMode()" title="Cambiar modo claro/oscuro">' + (S.darkMode ? "☀️" : "🌙") + ' <span>' + (S.darkMode ? "Claro" : "Oscuro") + '</span></button>' +
+    '<button class="hbn" onclick="openChangeMyPw()">🔑 <span>Contraseña</span></button>' +
+    '<button class="hbn" onclick="doLogout()">🚪 <span>Salir</span></button></div></div><div class="hgl"></div></header>' +
     '<main class="mn">' +
-    (canAdd ? '<button class="btn bg" onclick="openAdd()" style="margin-bottom:16px;">\u2795 Agregar Post</button>' : '<div class="vn">\u{1F441} Modo visualizador — Solo puedes ver el contenido.</div>') +
-    '<div class="tb"><div><div class="tt">Publicaciones Guardadas</div><div class="tc">' + S.total + ' publicaciones</div></div><div class="ta">' +
-    '<div class="sb"><span class="si">\u{1F50D}</span><input type="text" placeholder="Buscar..." value="' + escH(S.search) + '" oninput="doSearch(this.value)"></div>' +
+    (canAdd ? '<button class="btn bg" onclick="openAdd()" style="margin-bottom:16px;">➕ Agregar Post</button>' : '<div class="vn">👁 Modo visualizador — Solo puedes ver el contenido.</div>') +
+    '<div class="tb"><div><div class="tt">Publicaciones Guardadas</div><div style="display:flex;align-items:center;gap:10px;"><div class="tc">' + S.total + ' publicaciones</div><span class="rt-indicator"><span class="rt-dot"></span>En vivo</span></div></div><div class="ta">' +
+    '<div class="sb"><span class="si">🔍</span><input type="text" placeholder="Buscar..." value="' + escH(S.search) + '" oninput="doSearch(this.value)"></div>' +
     '<select id="yFilter" class="fi" style="padding:10px 12px;border:2px solid var(--bd);border-radius:10px;font-size:13px;width:auto;min-width:130px;outline:none;cursor:pointer;background:var(--cb)" onchange="doYearFilter(this.value)"><option value="todos">Todos los años</option></select>' +
-    '<div class="vt"><button class="vb ' + (S.view === "grid" ? "ac" : "") + '" onclick="setV(\'grid\')">\u25A6</button><button class="vb ' + (S.view === "list" ? "ac" : "") + '" onclick="setV(\'list\')">\u2630</button></div></div></div>' +
+    '<button class="btn bo bs" onclick="exportCSV()" title="Exportar a CSV">📥 CSV</button>' +
+    '<div class="vt"><button class="vb ' + (S.view === "grid" ? "ac" : "") + '" onclick="setV(\'grid\')">▦</button><button class="vb ' + (S.view === "list" ? "ac" : "") + '" onclick="setV(\'list\')">☰</button></div></div></div>' +
     '<div id="pC"></div><div id="pgC"></div></main>' +
-    '<footer class="ft"><div class="fgl"></div><div class="fi2"><div class="fb">' + logoHTML("fl2", "sm") + '<span style="font-size:13px;font-weight:700;">RULETERO 222</span><span style="color:var(--g);font-size:11px;">|</span><span style="font-size:11px;color:rgba(255,255,255,.6);">La Ruta de los Poblanos</span></div><div class="fc">\u00a9 ' + new Date().getFullYear() + ' Gestor de Posts</div></div></footer>';
+    '<footer class="ft"><div class="fgl"></div><div class="fi2"><div class="fb">' + logoHTML("fl2", "sm") + '<span style="font-size:13px;font-weight:700;">RULETERO 222</span><span style="color:var(--g);font-size:11px;">|</span><span style="font-size:11px;color:rgba(255,255,255,.6);">La Ruta de los Poblanos</span></div><div class="fc">© ' + new Date().getFullYear() + ' Gestor de Posts v7.0</div></div></footer>';
 
   if (!S.loading) renderPosts();
+  if (S.showSettings && ad) setTimeout(loadAuditLog, 200);
 }
 
 // ============ CHANGE MY PASSWORD ============
 function openChangeMyPw() {
   var d = document.createElement("div"); d.id = "chPwM"; d.className = "mo";
-  d.innerHTML = '<div class="md"><div class="mh"><h3>\u{1F511} Cambiar Mi Contraseña</h3><button class="mc" onclick="clM(\'chPwM\')">\u2715</button></div>' +
+  d.innerHTML = '<div class="md"><div class="mh"><h3>🔑 Cambiar Mi Contraseña</h3><button class="mc" onclick="clM(\'chPwM\')">✕</button></div>' +
     '<div class="mb">' +
-    '<div class="fg"><label class="fl">Contraseña actual</label><div class="pw"><input type="password" id="cpCur" class="fi" placeholder="Tu contraseña actual"><button type="button" class="pt" onclick="togglePw(\'cpCur\',this)">\u{1F441}</button></div></div>' +
-    '<div class="fg"><label class="fl">Nueva contraseña</label><div class="pw"><input type="password" id="cpNew" class="fi" placeholder="Mínimo 6 caracteres"><button type="button" class="pt" onclick="togglePw(\'cpNew\',this)">\u{1F441}</button></div></div>' +
-    '<div class="fg"><label class="fl">Confirmar nueva contraseña</label><div class="pw"><input type="password" id="cpConf" class="fi" placeholder="Repite la nueva contraseña"><button type="button" class="pt" onclick="togglePw(\'cpConf\',this)">\u{1F441}</button></div></div>' +
-    '</div><div class="mf"><button class="btn bo" onclick="clM(\'chPwM\')">Cancelar</button><button class="btn bp" id="cpBtn" onclick="doChangeMyPw()" style="width:auto">\u{1F4BE} Cambiar</button></div></div>';
+    '<div class="fg"><label class="fl">Contraseña actual</label><div class="pw"><input type="password" id="cpCur" class="fi" placeholder="Tu contraseña actual"><button type="button" class="pt" onclick="togglePw(\'cpCur\',this)">👁</button></div></div>' +
+    '<div class="fg"><label class="fl">Nueva contraseña</label><div class="pw"><input type="password" id="cpNew" class="fi" placeholder="Mínimo 6 caracteres"><button type="button" class="pt" onclick="togglePw(\'cpNew\',this)">👁</button></div></div>' +
+    '<div class="fg"><label class="fl">Confirmar nueva contraseña</label><div class="pw"><input type="password" id="cpConf" class="fi" placeholder="Repite la nueva contraseña"><button type="button" class="pt" onclick="togglePw(\'cpConf\',this)">👁</button></div></div>' +
+    '</div><div class="mf"><button class="btn bo" onclick="clM(\'chPwM\')">Cancelar</button><button class="btn bp" id="cpBtn" onclick="doChangeMyPw()" style="width:auto">💾 Cambiar</button></div></div>';
   document.body.appendChild(d); setTimeout(function () { d.classList.add("ac"); }, 50);
 }
 
@@ -1125,16 +1331,12 @@ async function doChangeMyPw() {
 
   try {
     var user = auth.currentUser;
-    if (!user) { toast("No hay sesión activa", "error"); b.disabled = false; b.textContent = "\u{1F4BE} Cambiar"; return; }
-
-    // Re-autenticar al usuario con su contraseña actual
+    if (!user) { toast("No hay sesión activa", "error"); b.disabled = false; b.textContent = "💾 Cambiar"; return; }
     var credential = firebase.auth.EmailAuthProvider.credential(user.email, cur);
     await user.reauthenticateWithCredential(credential);
-
-    // Cambiar la contraseña
     await user.updatePassword(nw);
-
-    toast("\u2705 Contraseña cambiada correctamente", "success");
+    _audit("change_password", "Contraseña cambiada");
+    toast("✅ Contraseña cambiada correctamente", "success");
     clM("chPwM");
   } catch (e) {
     var msg = "Error al cambiar la contraseña";
@@ -1143,16 +1345,11 @@ async function doChangeMyPw() {
     else if (e.code === "auth/requires-recent-login") msg = "Tu sesión expiró. Cierra sesión e inicia de nuevo";
     else if (e.message) msg = e.message;
     toast(msg, "error");
-    b.disabled = false; b.textContent = "\u{1F4BE} Cambiar";
+    b.disabled = false; b.textContent = "💾 Cambiar";
   }
 }
 
 // ============ RESET PASSWORD (ADMIN) ============
-function openResetPwU(uid) {
-  // Redirigir directamente al envío de email de reseteo
-  sendResetEmail(uid);
-}
-
 async function sendResetEmail(uid) {
   var u = S.users.find(function (x) { return x.id === uid; });
   if (!u) { toast("Usuario no encontrado", "error"); return; }
@@ -1160,12 +1357,12 @@ async function sendResetEmail(uid) {
   var email = u.email;
   if (!email) { toast("Este usuario no tiene correo electrónico registrado", "error"); return; }
 
-  // Confirmación antes de enviar
   if (!confirm('¿Enviar email de reseteo de contraseña a ' + email + '?\n\nEl usuario recibirá un correo de Firebase para cambiar su contraseña.')) return;
 
   try {
     await auth.sendPasswordResetEmail(email);
-    toast("\u2705 Email de reseteo enviado a " + email, "success");
+    _audit("reset_password", "Email de reseteo enviado a: " + email);
+    toast("✅ Email de reseteo enviado a " + email, "success");
   } catch (e) {
     var msg = "Error al enviar email de reseteo";
     if (e.code === "auth/user-not-found") msg = "No se encontró la cuenta de Firebase para este correo";
@@ -1180,30 +1377,15 @@ function clM(id) { var d = document.getElementById(id); if (d) { d.classList.rem
 
 // ============ INICIALIZACIÓN DEL SISTEMA ============
 async function setupInitialAdmin() {
-  /**
-   * EJECUTA ESTA FUNCIÓN UNA SOLA VEZ desde la consola del navegador
-   * para crear el usuario administrador inicial.
-   * 
-   * IMPORTANTE: Cambia el email por tu correo real antes de ejecutar.
-   * 
-   * Uso: setupInitialAdmin()
-   */
   try {
-    // ⚠️ CAMBIA ESTE EMAIL POR TU CORREO REAL
     var adminEmail = "tu-correo-real@gmail.com";
-
-    // Verificar si ya existe el admin
     var existing = await db.collection("users").where("email", "==", adminEmail).limit(1).get();
     if (!existing.empty) {
       toast("Ya existe un usuario con ese correo", "info");
       return;
     }
-
-    // Crear en Firebase Auth con email real
     var cred = await auth.createUserWithEmailAndPassword(adminEmail, "admin123");
     var uid = cred.user.uid;
-
-    // Crear documento en Firestore
     await db.collection("users").doc(uid).set({
       email: adminEmail,
       name: "Administrador",
@@ -1212,13 +1394,8 @@ async function setupInitialAdmin() {
       createdAt: new Date().toISOString(),
       uid: uid
     });
-
-    // Crear documento de configuración
     await db.collection("config").doc("app").set({ logoUrl: "" }, { merge: true });
-
-    // Cerrar sesión del admin recién creado
     await auth.signOut();
-
     toast("✅ Admin creado. Email: " + adminEmail + " | Contraseña: admin123", "success");
     toast("⚠️ Cambia la contraseña después de iniciar sesión", "info");
   } catch (e) {
@@ -1227,5 +1404,4 @@ async function setupInitialAdmin() {
 }
 
 // ============ START ============
-// La inicialización se hace cuando se carga firebase-config.js
 // init() se llama al final de index.html
