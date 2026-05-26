@@ -1145,8 +1145,8 @@ function computeDash() {
     var mks = Object.keys(months).sort();
     if (mks.length >= 2) {
       var lm = months[mks[mks.length - 1]], pm = months[mks[mks.length - 2]];
-      var lt = lm.historico + lm.cultural + lm.social + lm.sin_clasificado;
-      var pt = pm.historico + pm.cultural + pm.social + pm.sin_clasificado;
+      var lt = lm.historico + lm.cultural + lm.social + lm.sin_clasificar;
+      var pt = pm.historico + pm.cultural + pm.social + pm.sin_clasificar;
       var ch = pt > 0 ? Math.round((lt - pt) / pt * 100) : 0;
       insights.push({ type: ch >= 0 ? "success" : "warning", title: "Tendencia", text: ch >= 0 ? "📈 +" + ch + "% vs mes anterior" : "📉 " + ch + "% vs mes anterior" });
     }
@@ -1179,8 +1179,8 @@ function rDash() {
   h += '<div class="cg">';
   h += '<div class="cc"><h4>📈 Tendencia Mensual</h4>';
   if (d.months.length) {
-    var mmx = 0; for (var i = 0; i < d.months.length; i++) { var t = d.months[i].historico + d.months[i].cultural + d.months[i].social + d.months[i].sin_clasificado; if (t > mmx) mmx = t; } mmx = mmx || 1;
-    for (var i = 0; i < d.months.length; i++) { var t = d.months[i].historico + d.months[i].cultural + d.months[i].social + d.months[i].sin_clasificado; h += '<div class="br"><div class="bl">' + d.months[i].month + '</div><div class="bt"><div class="bf" style="width:' + Math.round(t / mmx * 100) + '%;background:var(--n);">' + t + '</div></div></div>'; }
+    var mmx = 0; for (var i = 0; i < d.months.length; i++) { var t = d.months[i].historico + d.months[i].cultural + d.months[i].social + d.months[i].sin_clasificar; if (t > mmx) mmx = t; } mmx = mmx || 1;
+    for (var i = 0; i < d.months.length; i++) { var t = d.months[i].historico + d.months[i].cultural + d.months[i].social + d.months[i].sin_clasificar; h += '<div class="br"><div class="bl">' + d.months[i].month + '</div><div class="bt"><div class="bf" style="width:' + Math.round(t / mmx * 100) + '%;background:var(--n);">' + t + '</div></div></div>'; }
   } else { h += '<p style="color:var(--m);font-size:13px;">Sin datos suficientes</p>'; }
   h += '</div>';
 
