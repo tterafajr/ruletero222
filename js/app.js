@@ -1271,27 +1271,49 @@ async function uploadLogo(input) {
   if (file.size > 5 * 1024 * 1024) { toast("La imagen no debe superar 5 MB", "error"); return; }
   if (!file.type.startsWith("image/")) { toast("Solo se permiten imágenes", "error"); return; }
 
-  toast("Subiendo logo...", "info");
-  var prog = document.getElementById("logoProgress");
-  var bar = document.getElementById("logoBar");
-  if (prog) prog.style.display = "block";
+  toast("Procesando logo...", "info");
 
   try {
-    var ref = storage.ref("config/logo_" + Date.now() + "_" + file.name);
-    var uploadTask = ref.put(file);
+    var url = null;
 
-    var url = await new Promise(function (resolve, reject) {
-      uploadTask.on("state_changed",
-        function (snapshot) {
-          var progress = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
-          if (bar) bar.style.width = progress + "%";
-        },
-        function (error) { reject(error); },
-        function () {
-          uploadTask.snapshot.ref.getDownloadURL().then(resolve).catch(reject);
-        }
-      );
-    });
+    // Método 1: Intentar Firebase Storage (preferido)
+    if (storage && storage.ref) {
+      try {
+        toast("Subiendo a Firebase Storage...", "info");
+        var ref = storage.ref("config/logo_" + Date.now() + "_" + file.name);
+        var uploadTask = ref.put(file);
+
+        url = await new Promise(function (resolve, reject) {
+          uploadTask.on("state_changed",
+            function (snapshot) {
+              var progress = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
+              toast("Subiendo... " + progress + "%", "info");
+            },
+            function (error) {
+              console.warn("Storage upload failed, using base64 fallback:", error.code || error.message);
+              reject(error);
+            },
+            function () {
+              uploadTask.snapshot.ref.getDownloadURL().then(resolve).catch(reject);
+            }
+          );
+        });
+      } catch (storageErr) {
+        console.warn("Storage no disponible, usando base64:", storageErr.code || storageErr.message);
+        url = null; // Continuar con método 2
+      }
+    }
+
+    // Método 2: Convertir a base64 y guardar en Firestore (fallback)
+    if (!url) {
+      toast("Guardando logo como base64...", "info");
+      url = await new Promise(function (resolve, reject) {
+        var reader = new FileReader();
+        reader.onload = function (e) { resolve(e.target.result); };
+        reader.onerror = function () { reject(new Error("No se pudo leer la imagen")); };
+        reader.readAsDataURL(file);
+      });
+    }
 
     await db.collection("config").doc("app").set({ logoUrl: url }, { merge: true });
     S.logoUrl = url;
@@ -1302,8 +1324,8 @@ async function uploadLogo(input) {
     renderApp();
     setTimeout(loadAuditLog, 100);
   } catch (e) {
-    toast("Error al subir logo: " + e.message, "error");
-    if (prog) prog.style.display = "none";
+    console.error("uploadLogo error:", e);
+    toast("❌ " + e.message, "error");
   }
 }
 
