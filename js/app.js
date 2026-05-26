@@ -1394,7 +1394,7 @@ async function loadAuditLog() {
       container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--m);font-size:13px;">Sin registros de auditoría</div>';
       return;
     }
-    var h = '<div class="audit-wrap"><table class="audit-table"><thead><tr><th>Fecha</th><th>Acción</th><th>Usuario</th><th>Detalles</th></tr></thead><tbody>';
+    var h = '<div class="audit-wrap"><table class="audit-table"><thead><tr><th class="audit-col-date">Fecha</th><th class="audit-col-action">Acción</th><th class="audit-col-user">Usuario</th><th class="audit-col-details">Detalles</th></tr></thead><tbody>';
     snapshot.forEach(function (doc) {
       var d = doc.data();
       var date = d.timestamp ? new Date(d.timestamp.seconds * 1000).toLocaleString("es-MX") : "—";
@@ -1404,7 +1404,7 @@ async function loadAuditLog() {
       else if (actionType === "update") actionClass = "audit-update";
       else if (actionType === "delete") actionClass = "audit-delete";
       else if (d.action === "login" || d.action === "logout") actionClass = "audit-login";
-      h += '<tr><td style="white-space:nowrap;">' + escH(date) + '</td><td><span class="audit-action ' + actionClass + '">' + escH(d.action) + '</span></td><td>' + escH(d.userName || "—") + '</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escH(d.details || "") + '">' + escH(d.details || "—") + '</td></tr>';
+      h += '<tr><td title="' + escH(date) + '">' + escH(date) + '</td><td><span class="audit-action ' + actionClass + '">' + escH(d.action) + '</span></td><td title="' + escH(d.userName || "") + '">' + escH(d.userName || "—") + '</td><td title="' + escH(d.details || "") + '">' + escH(d.details || "—") + '</td></tr>';
     });
     h += '</tbody></table></div>';
     container.innerHTML = h;
@@ -1443,6 +1443,7 @@ function renderApp() {
 
   if (!S.loading) renderPosts();
   if (S.showSettings && ad) setTimeout(loadAuditLog, 200);
+  renderYearFilter();
 }
 
 // ============ CHANGE MY PASSWORD ============
