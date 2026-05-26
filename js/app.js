@@ -589,7 +589,7 @@ function _startPostsListener() {
           pageTitle: d.pageTitle || "",
           category: d.category || "sin_clasificar",
           addedBy: d.addedBy || "Anónimo",
-          createdAt: d.createdAt || "",
+          createdAt: d.createdAt ? (d.createdAt.toDate ? d.createdAt.toDate().toISOString() : d.createdAt) : "",
           images: d.images || []
         });
       });
@@ -625,7 +625,7 @@ async function _fetchPostsFromFirestore(bustCache) {
         pageTitle: d.pageTitle || "",
         category: d.category || "sin_clasificar",
         addedBy: d.addedBy || "Anónimo",
-        createdAt: d.createdAt || "",
+        createdAt: d.createdAt ? (d.createdAt.toDate ? d.createdAt.toDate().toISOString() : d.createdAt) : "",
         images: d.images || []
       });
     });
@@ -1109,6 +1109,7 @@ function exportCSV() {
 function togDash() { S.showDash = !S.showDash; if (S.showDash) computeDash(); else renderApp(); }
 
 function computeDash() {
+  try {
   var posts = S.allPosts;
   var total = posts.length;
   var wImg = 0, cats = {}, months = {}, contribs = {};
@@ -1120,12 +1121,22 @@ function computeDash() {
   for (var i = 0; i < posts.length; i++) {
     var p = posts[i];
     if (p.images && p.images.length > 0) wImg++;
-    cats[p.category] = (cats[p.category] || 0) + 1;
-    var dt = new Date(p.createdAt);
-    var mk = dt.getFullYear() + "-" + ("0" + (dt.getMonth() + 1)).slice(-2);
-    if (!months[mk]) months[mk] = { historico: 0, cultural: 0, social: 0, sin_clasificar: 0 };
-    months[mk][p.category]++;
-    days[dt.getDay()].c++;
+    var cat = p.category || "sin_clasificar";
+    cats[cat] = (cats[cat] || 0) + 1;
+    try {
+      var dt = new Date(p.createdAt);
+      if (isNaN(dt.getTime())) dt = new Date();
+      var mk = dt.getFullYear() + "-" + ("0" + (dt.getMonth() + 1)).slice(-2);
+      if (!months[mk]) months[mk] = { historico: 0, cultural: 0, social: 0, sin_clasificar: 0 };
+      if (months[mk][cat] !== undefined) months[mk][cat]++;
+      else months[mk]["sin_clasificar"]++;
+      days[dt.getDay()].c++;
+    } catch (dateErr) {
+      // Si falla el parseo de fecha, usar fecha actual
+      var mk2 = new Date().getFullYear() + "-" + ("0" + (new Date().getMonth() + 1)).slice(-2);
+      if (!months[mk2]) months[mk2] = { historico: 0, cultural: 0, social: 0, sin_clasificar: 0 };
+      months[mk2]["sin_clasificar"]++;
+    }
     contribs[p.addedBy] = (contribs[p.addedBy] || 0) + 1;
   }
 
@@ -1157,6 +1168,12 @@ function computeDash() {
     cats: catArr, months: mArr, days: days, topC: topC, insights: insights
   };
   renderApp();
+  } catch (e) {
+    console.error("Error en computeDash:", e);
+    S.dashData = { kpis: { total: S.allPosts.length, wImg: 0, uc: 0, cc: 0 }, cats: [], months: [], days: [], topC: [], insights: [] };
+    renderApp();
+    toast("Error al cargar Dashboard", "error");
+  }
 }
 
 function rDash() {
