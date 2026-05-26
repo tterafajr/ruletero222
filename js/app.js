@@ -4,7 +4,7 @@
  * 
  * Migrado de Google Apps Script a Firebase Firestore + Auth
  * 
- * v9.0 — Logo real del usuario incrustado, Dark Mode fix en rol
+ * v9.1 — Fix: timeout en guardado de posts para evitar que se trabe
  */
 
 // ============ ESTADO GLOBAL ============
@@ -264,13 +264,31 @@ function _removeUpload(inputId) {
 async function _uploadImageToStorage(file, postId) {
   if (!file) return null;
   try {
+    // Verificar que Storage esté disponible
+    if (!storage || !storage.ref) {
+      console.error("Firebase Storage no está configurado");
+      toast("Firebase Storage no está disponible. Contacta al administrador.", "error");
+      return null;
+    }
     var fileName = "posts/" + (postId || Date.now()) + "/" + Date.now() + "_" + file.name;
     var ref = storage.ref(fileName);
     var uploadTask = ref.put(file);
 
+    // Timeout de 60 segundos para la subida
+    var timeoutId = setTimeout(function () {
+      console.warn("Upload timeout — cancelando subida");
+      uploadTask.cancel();
+    }, 60000);
+
     return new Promise(function (resolve, reject) {
       uploadTask.on("state_changed",
         function (snapshot) {
+          clearTimeout(timeoutId);
+          // Reiniciar timeout mientras hay progreso
+          timeoutId = setTimeout(function () {
+            console.warn("Upload stalled — cancelando subida");
+            uploadTask.cancel();
+          }, 60000);
           var progress = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
           var bar = document.getElementById("aFile-bar") || document.getElementById("eFile-bar");
           var prog = document.getElementById("aFile-progress") || document.getElementById("eFile-progress");
@@ -278,10 +296,12 @@ async function _uploadImageToStorage(file, postId) {
           if (prog) prog.style.display = "block";
         },
         function (error) {
+          clearTimeout(timeoutId);
           console.error("Upload error:", error);
           reject(error);
         },
         function () {
+          clearTimeout(timeoutId);
           uploadTask.snapshot.ref.getDownloadURL().then(function (url) {
             resolve(url);
           }).catch(reject);
@@ -803,6 +823,16 @@ function openAdd() {
   document.body.appendChild(d); setTimeout(function () { d.classList.add("ac"); }, 50);
 }
 
+// Helper: wrapper con timeout para promesas
+function _withTimeout(promise, ms, errorMsg) {
+  return Promise.race([
+    promise,
+    new Promise(function (_, reject) {
+      setTimeout(function () { reject(new Error(errorMsg || "Tiempo de espera agotado")); }, ms);
+    })
+  ]);
+}
+
 async function doAdd() {
   var url = document.getElementById("aUrl").value.trim(),
     txt = document.getElementById("aText").value,
@@ -813,38 +843,62 @@ async function doAdd() {
   if (!url) { toast("La URL es requerida", "error"); return; }
   var b = document.getElementById("aBtn"); b.disabled = true; b.textContent = "Guardando...";
 
+  // Timeout global de 90 segundos para toda la operación
+  var saveTimeout = setTimeout(function () {
+    toast("La operación tardó demasiado. Verifica tu conexión e inténtalo de nuevo.", "error");
+    b.disabled = false; b.textContent = "💾 Guardar";
+  }, 90000);
+
   try {
     var cat = (selCat && selCat !== "auto") ? selCat : _classify(txt, ttl);
 
-    // Auto-fetch OG image si no hay
+    // Auto-fetch OG image si no hay (con timeout de 15s)
     if (imgs.length === 0 && url) {
       try {
-        var meta = await fetchPostMeta(url);
+        var meta = await _withTimeout(fetchPostMeta(url), 15000, "Timeout obteniendo metadatos");
         if (meta.ok && meta.meta && meta.meta.image) imgs = [meta.meta.image];
         if (!ttl && meta.ok && meta.meta && meta.meta.title) ttl = meta.meta.title;
-      } catch (e) { /* silencioso */ }
+      } catch (e) { /* silencioso — continuar sin imagen */ }
     }
 
-    // Subir imagen de archivo si existe
+    // Subir imagen de archivo si existe (con timeout de 60s)
     if (S.uploadedFile) {
       b.textContent = "Subiendo imagen...";
-      var uploadedUrl = await _uploadImageToStorage(S.uploadedFile, "new_" + Date.now());
-      if (uploadedUrl) {
-        imgs = [uploadedUrl]; // La imagen subida tiene prioridad
+      try {
+        var uploadedUrl = await _withTimeout(
+          _uploadImageToStorage(S.uploadedFile, "new_" + Date.now()),
+          60000,
+          "Timeout subiendo imagen"
+        );
+        if (uploadedUrl) {
+          imgs = [uploadedUrl]; // La imagen subida tiene prioridad
+        }
+      } catch (uploadErr) {
+        console.error("Error subiendo imagen:", uploadErr);
+        toast("No se pudo subir la imagen. Se guardará el post sin imagen.", "warning");
+        // Continuar sin imagen subida
       }
     }
 
-    var docRef = await db.collection("posts").add({
-      url: url, postText: txt, postDate: dt, pageTitle: ttl,
-      category: cat, addedBy: S.user.name,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-      images: imgs
-    });
+    b.textContent = "Guardando...";
+    var docRef = await _withTimeout(
+      db.collection("posts").add({
+        url: url, postText: txt, postDate: dt, pageTitle: ttl,
+        category: cat, addedBy: S.user.name,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        images: imgs
+      }),
+      30000,
+      "Timeout guardando en la base de datos"
+    );
 
+    clearTimeout(saveTimeout);
     _audit("create_post", "Post creado: " + ttl + " (" + cat + ")");
     toast("✅ Post agregado — Clasificación: " + cat, "success");
     clM("addM"); S.fetchedImage = ""; S.uploadedFile = null; S.uploadedUrl = "";
   } catch (e) {
+    clearTimeout(saveTimeout);
+    console.error("Error guardando post:", e);
     toast("Error: " + e.message, "error");
     b.disabled = false; b.textContent = "💾 Guardar";
   }
@@ -883,23 +937,48 @@ async function doEditPost(postId) {
   if (!url) { toast("La URL es requerida", "error"); return; }
   var b = document.getElementById("eBtn"); b.disabled = true; b.textContent = "Guardando...";
 
+  // Timeout global de 90 segundos para toda la operación
+  var saveTimeout = setTimeout(function () {
+    toast("La operación tardó demasiado. Verifica tu conexión e inténtalo de nuevo.", "error");
+    b.disabled = false; b.textContent = "💾 Guardar Cambios";
+  }, 90000);
+
   try {
-    // Subir imagen de archivo si existe
+    // Subir imagen de archivo si existe (con timeout de 60s)
     if (S.uploadedFile) {
       b.textContent = "Subiendo imagen...";
-      var uploadedUrl = await _uploadImageToStorage(S.uploadedFile, postId);
-      if (uploadedUrl) {
-        imgs = [uploadedUrl];
+      try {
+        var uploadedUrl = await _withTimeout(
+          _uploadImageToStorage(S.uploadedFile, postId),
+          60000,
+          "Timeout subiendo imagen"
+        );
+        if (uploadedUrl) {
+          imgs = [uploadedUrl];
+        }
+      } catch (uploadErr) {
+        console.error("Error subiendo imagen:", uploadErr);
+        toast("No se pudo subir la imagen. Se guardarán los cambios sin imagen nueva.", "warning");
+        // Continuar sin imagen subida
       }
     }
 
-    await db.collection("posts").doc(postId).update({
-      url: url, postText: txt, postDate: dt, pageTitle: ttl, category: cat, images: imgs
-    });
+    b.textContent = "Guardando...";
+    await _withTimeout(
+      db.collection("posts").doc(postId).update({
+        url: url, postText: txt, postDate: dt, pageTitle: ttl, category: cat, images: imgs
+      }),
+      30000,
+      "Timeout guardando en la base de datos"
+    );
+
+    clearTimeout(saveTimeout);
     _audit("update_post", "Post editado: " + ttl);
     toast("✅ Post actualizado", "success");
     clM("editPM"); S.fetchedImage = ""; S.editPostData = null; S.uploadedFile = null; S.uploadedUrl = "";
   } catch (e) {
+    clearTimeout(saveTimeout);
+    console.error("Error editando post:", e);
     toast("Error: " + e.message, "error");
     b.disabled = false; b.textContent = "💾 Guardar Cambios";
   }
