@@ -138,22 +138,48 @@ async function fetchPostMeta(url) {
   try {
     if (!url) return { ok: false, error: "URL requerida" };
     var meta = { image: "", title: "", description: "" };
+
+    // Proxies CORS en paralelo para mayor velocidad
     var proxyUrls = [
       "https://api.allorigins.win/get?url=",
-      "https://corsproxy.io/?"
+      "https://corsproxy.io/?",
+      "https://api.codetabs.com/v1/proxy?quest="
     ];
+
     var html = null;
-    for (var p = 0; p < proxyUrls.length; p++) {
-      try {
-        var proxyUrl = proxyUrls[p] + encodeURIComponent(url);
-        var response = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
-        if (!response.ok) continue;
-        var data = await response.json();
-        html = data.contents || data;
-        if (html && html.length > 100) break;
-        html = null;
-      } catch (e) { continue; }
+    // Intentar todos los proxies en PARALELO y usar el primero que responda
+    var fetchPromises = proxyUrls.map(function (proxy) {
+      return new Promise(function (resolve) {
+        var proxyUrl = proxy + encodeURIComponent(url);
+        fetch(proxyUrl, { signal: AbortSignal.timeout(8000) })
+          .then(function (response) {
+            if (!response.ok) throw new Error("not ok");
+            return response.json ? response.text() : response.text();
+          })
+          .then(function (data) {
+            var content = "";
+            try {
+              var parsed = JSON.parse(data);
+              content = parsed.contents || parsed;
+            } catch (e) {
+              content = data;
+            }
+            if (content && content.length > 100) {
+              resolve(content);
+            } else {
+              resolve(null);
+            }
+          })
+          .catch(function () { resolve(null); });
+      });
+    });
+
+    // Usar el primer resultado válido
+    var results = await Promise.all(fetchPromises);
+    for (var i = 0; i < results.length; i++) {
+      if (results[i]) { html = results[i]; break; }
     }
+
     if (!html) return { ok: true, meta: meta };
     var ogImgMatch = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
     if (!ogImgMatch) ogImgMatch = html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:image["']/i);
@@ -188,6 +214,21 @@ async function fetchPostMeta(url) {
   } catch (e) {
     return { ok: false, error: e.message };
   }
+}
+
+// Obtener imagen en segundo plano y actualizar el post en Firestore
+function _fetchImageInBackground(postId, url) {
+  fetchPostMeta(url).then(function (r) {
+    if (r.ok && r.meta && r.meta.image) {
+      db.collection("posts").doc(postId).update({
+        images: [r.meta.image]
+      }).then(function () {
+        console.log("Imagen actualizada en background para post:", postId);
+      }).catch(function (e) {
+        console.warn("No se pudo actualizar imagen en background:", e);
+      });
+    }
+  }).catch(function () { /* silencioso */ });
 }
 
 function _htmlDecode(str) {
@@ -812,15 +853,29 @@ function openAdd() {
   var d = document.createElement("div"); d.id = "addM"; d.className = "mo";
   d.innerHTML = '<div class="md"><div class="mh"><h3>➕ Agregar Post</h3><button class="mc" onclick="clM(\'addM\')">✕</button></div>' +
     '<div class="mb">' +
-    '<div class="fg"><label class="fl">URL del post de Facebook</label><div style="display:flex;gap:8px;"><input type="url" id="aUrl" class="fi" placeholder="https://www.facebook.com/..." style="flex:1"><button class="btn bg bs" onclick="doFetchMeta(\'aUrl\',\'aPrv\',\'aTitle\')" style="white-space:nowrap">🔍 Vista previa</button></div></div>' +
-    '<div id="aPrv" class="iprv"><div class="iph">📷 La imagen se obtendrá automáticamente del enlace</div></div>' +
-    '<div class="fg"><label class="fl">O subir imagen desde tu dispositivo</label>' + _renderUploadArea("aFile", "") + '</div>' +
+    '<div class="fg"><label class="fl">URL del post de Facebook</label><div style="display:flex;gap:8px;"><input type="url" id="aUrl" class="fi" placeholder="https://www.facebook.com/..." style="flex:1"><button class="btn bg bs" onclick="doFetchMeta(\'aUrl\',\'aPrv\',\'aTitle\')" style="white-space:nowrap">🔍 Obtener imagen</button></div></div>' +
+    '<div id="aPrv" class="iprv"><div class="iph">📷 La imagen se obtendrá automáticamente al pegar la URL</div></div>' +
+    '<details class="upload-optional"><summary>📎 Subir imagen manualmente (opcional)</summary><div class="fg">' + _renderUploadArea("aFile", "") + '</div></details>' +
     '<div class="fg"><label class="fl">Texto del post</label><textarea id="aText" class="fi" rows="4" placeholder="Copia el texto del post aquí"></textarea></div>' +
     '<div class="fg"><label class="fl">Fecha del post</label><input type="date" id="aDate" class="fi"></div>' +
     '<div class="fg"><label class="fl">Título / Página</label><input type="text" id="aTitle" class="fi" placeholder="Nombre de la página o título"></div>' +
     '<div class="fg"><label class="fl">Categoría</label><select id="aCat" class="fi"><option value="auto">🎯 Automático (según palabras clave)</option><option value="historico">Histórico</option><option value="cultural">Cultural</option><option value="social">Social</option><option value="sin_clasificar">Sin Clasificar</option></select></div>' +
     '</div><div class="mf"><button class="btn bo" onclick="clM(\'addM\')">Cancelar</button><button class="btn bp" id="aBtn" onclick="doAdd()" style="width:auto">💾 Guardar</button></div></div>';
   document.body.appendChild(d); setTimeout(function () { d.classList.add("ac"); }, 50);
+  // Auto-obtener imagen al pegar o salir del campo URL
+  var urlInput = document.getElementById("aUrl");
+  if (urlInput) {
+    var _addFetchTimer = null;
+    urlInput.addEventListener("paste", function () {
+      setTimeout(function () { doFetchMeta("aUrl", "aPrv", "aTitle"); }, 300);
+    });
+    urlInput.addEventListener("blur", function () {
+      var v = this.value.trim();
+      if (v && v.indexOf("http") === 0 && !S.fetchedImage && !S.uploadedFile) {
+        doFetchMeta("aUrl", "aPrv", "aTitle");
+      }
+    });
+  }
 }
 
 // Helper: wrapper con timeout para promesas
@@ -851,14 +906,11 @@ async function doAdd() {
 
   try {
     var cat = (selCat && selCat !== "auto") ? selCat : _classify(txt, ttl);
+    var needBackgroundImage = false;
 
-    // Auto-fetch OG image si no hay (con timeout de 15s)
-    if (imgs.length === 0 && url) {
-      try {
-        var meta = await _withTimeout(fetchPostMeta(url), 15000, "Timeout obteniendo metadatos");
-        if (meta.ok && meta.meta && meta.meta.image) imgs = [meta.meta.image];
-        if (!ttl && meta.ok && meta.meta && meta.meta.title) ttl = meta.meta.title;
-      } catch (e) { /* silencioso — continuar sin imagen */ }
+    // Si no hay imagen pre-cargada, se obtendrá en segundo plano después de guardar
+    if (imgs.length === 0 && !S.uploadedFile) {
+      needBackgroundImage = true;
     }
 
     // Subir imagen de archivo si existe (con timeout de 60s)
@@ -876,10 +928,11 @@ async function doAdd() {
       } catch (uploadErr) {
         console.error("Error subiendo imagen:", uploadErr);
         toast("No se pudo subir la imagen. Se guardará el post sin imagen.", "warning");
-        // Continuar sin imagen subida
+        needBackgroundImage = true;
       }
     }
 
+    // GUARDAR INMEDIATAMENTE — sin esperar fetch de imagen
     b.textContent = "Guardando...";
     var docRef = await _withTimeout(
       db.collection("posts").add({
@@ -894,7 +947,15 @@ async function doAdd() {
 
     clearTimeout(saveTimeout);
     _audit("create_post", "Post creado: " + ttl + " (" + cat + ")");
-    toast("✅ Post agregado — Clasificación: " + cat, "success");
+
+    // Obtener imagen en segundo plano si no se tiene aún
+    if (needBackgroundImage) {
+      _fetchImageInBackground(docRef.id, url);
+      toast("✅ Post agregado — La imagen se cargará automáticamente", "success");
+    } else {
+      toast("✅ Post agregado — Clasificación: " + cat, "success");
+    }
+
     clM("addM"); S.fetchedImage = ""; S.uploadedFile = null; S.uploadedUrl = "";
   } catch (e) {
     clearTimeout(saveTimeout);
@@ -925,6 +986,20 @@ function openEditPost(postId) {
     '<div class="fg"><label class="fl">Categoría</label><select id="eCat" class="fi"><option value="historico"' + (post.category === "historico" ? " selected" : "") + '>Histórico</option><option value="cultural"' + (post.category === "cultural" ? " selected" : "") + '>Cultural</option><option value="social"' + (post.category === "social" ? " selected" : "") + '>Social</option><option value="sin_clasificar"' + (post.category === "sin_clasificar" ? " selected" : "") + '>Sin Clasificar</option></select></div>' +
     '</div><div class="mf"><button class="btn bo" onclick="clM(\'editPM\')">Cancelar</button><button class="btn bp" id="eBtn" onclick="doEditPost(\'' + postId + '\')" style="width:auto">💾 Guardar Cambios</button></div></div>';
   document.body.appendChild(d); setTimeout(function () { d.classList.add("ac"); }, 50);
+  // Auto-obtener imagen al cambiar la URL en edición
+  var eUrlInput = document.getElementById("eUrl");
+  if (eUrlInput) {
+    eUrlInput.addEventListener("paste", function () {
+      setTimeout(function () { doFetchMeta("eUrl", "ePrv", "eTitle"); }, 300);
+    });
+    eUrlInput.addEventListener("change", function () {
+      var v = this.value.trim();
+      if (v && v.indexOf("http") === 0) {
+        S.fetchedImage = ""; // Reset para permitir nueva búsqueda
+        doFetchMeta("eUrl", "ePrv", "eTitle");
+      }
+    });
+  }
 }
 
 async function doEditPost(postId) {
@@ -944,6 +1019,13 @@ async function doEditPost(postId) {
   }, 90000);
 
   try {
+    var needBackgroundImage = false;
+
+    // Si no hay imagen y no se está subiendo una, se obtendrá en segundo plano
+    if (imgs.length === 0 && !S.uploadedFile) {
+      needBackgroundImage = true;
+    }
+
     // Subir imagen de archivo si existe (con timeout de 60s)
     if (S.uploadedFile) {
       b.textContent = "Subiendo imagen...";
@@ -959,10 +1041,11 @@ async function doEditPost(postId) {
       } catch (uploadErr) {
         console.error("Error subiendo imagen:", uploadErr);
         toast("No se pudo subir la imagen. Se guardarán los cambios sin imagen nueva.", "warning");
-        // Continuar sin imagen subida
+        needBackgroundImage = true;
       }
     }
 
+    // GUARDAR INMEDIATAMENTE
     b.textContent = "Guardando...";
     await _withTimeout(
       db.collection("posts").doc(postId).update({
@@ -974,7 +1057,15 @@ async function doEditPost(postId) {
 
     clearTimeout(saveTimeout);
     _audit("update_post", "Post editado: " + ttl);
-    toast("✅ Post actualizado", "success");
+
+    // Obtener imagen en segundo plano si no se tiene aún
+    if (needBackgroundImage) {
+      _fetchImageInBackground(postId, url);
+      toast("✅ Post actualizado — La imagen se cargará automáticamente", "success");
+    } else {
+      toast("✅ Post actualizado", "success");
+    }
+
     clM("editPM"); S.fetchedImage = ""; S.editPostData = null; S.uploadedFile = null; S.uploadedUrl = "";
   } catch (e) {
     clearTimeout(saveTimeout);
