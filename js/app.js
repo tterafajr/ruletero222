@@ -1394,7 +1394,7 @@ async function loadAuditLog() {
       container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--m);font-size:13px;">Sin registros de auditoría</div>';
       return;
     }
-    var h = '<table class="audit-table"><thead><tr><th>Fecha</th><th>Acción</th><th>Usuario</th><th>Detalles</th></tr></thead><tbody>';
+    var h = '<div class="audit-wrap"><table class="audit-table"><thead><tr><th>Fecha</th><th>Acción</th><th>Usuario</th><th>Detalles</th></tr></thead><tbody>';
     snapshot.forEach(function (doc) {
       var d = doc.data();
       var date = d.timestamp ? new Date(d.timestamp.seconds * 1000).toLocaleString("es-MX") : "—";
@@ -1406,7 +1406,7 @@ async function loadAuditLog() {
       else if (d.action === "login" || d.action === "logout") actionClass = "audit-login";
       h += '<tr><td style="white-space:nowrap;">' + escH(date) + '</td><td><span class="audit-action ' + actionClass + '">' + escH(d.action) + '</span></td><td>' + escH(d.userName || "—") + '</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escH(d.details || "") + '">' + escH(d.details || "—") + '</td></tr>';
     });
-    h += '</tbody></table>';
+    h += '</tbody></table></div>';
     container.innerHTML = h;
   } catch (e) {
     container.innerHTML = '<div style="text-align:center;padding:20px;color:#ef4444;font-size:13px;">Error cargando auditoría: ' + escH(e.message) + '</div>';
