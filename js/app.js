@@ -44,7 +44,8 @@ var POSTS_PER_PAGE = 12;
 // ============ HELPERS ============
 function logoHTML(cls, size) {
   if (S.logoUrl) {
-    return '<div class="' + cls + '"><img src="' + escH(S.logoUrl) + '" alt="RULETERO 222"></div>';
+    var bg = S.darkMode ? '#1e293b' : '#fff';
+    return '<div class="' + cls + '" style="background:' + bg + ';display:flex;align-items:center;justify-content:center;"><img src="' + escH(S.logoUrl) + '" alt="RULETERO 222"></div>';
   }
   var fs = size === "lg" ? "32px" : size === "md" ? "16px" : "12px";
   return '<div class="' + cls + '" style="font-size:' + fs + '">R</div>';
@@ -1197,7 +1198,7 @@ function rSettings() {
   var h = '<div class="so"><div class="dh"><h2>⚙️ Configuración</h2><button class="hbn" onclick="togSettings()">✕ Cerrar</button></div><div class="sc">';
 
   h += '<div class="slg"><h4>🎨 Logo de la Aplicación</h4><p>Ingresa la URL de tu logo para reemplazar la letra "R". Se recomienda una imagen cuadrada (PNG con fondo transparente funciona mejor).</p>';
-  h += '<div class="sprv"><div>' + (curLogo ? '<div class="lo"><img src="' + escH(curLogo) + '" alt="Logo"></div>' : logoHTML("lo", "lg")) + '</div><div>' + (curLogo ? '<div class="hl"><img src="' + escH(curLogo) + '" alt="Logo"></div>' : logoHTML("hl", "md")) + '</div><div>' + (curLogo ? '<div class="fl2"><img src="' + escH(curLogo) + '" alt="Logo"></div>' : logoHTML("fl2", "sm")) + '</div><div><div class="sprv-label">Vista previa: Login | Header | Footer</div></div></div>';
+  h += '<div class="sprv"><div>' + (curLogo ? '<div class="lo" style="background:#fff;display:flex;align-items:center;justify-content:center;"><img src="' + escH(curLogo) + '" alt="Logo"></div>' : logoHTML("lo", "lg")) + '</div><div>' + (curLogo ? '<div class="hl" style="background:#fff;display:flex;align-items:center;justify-content:center;"><img src="' + escH(curLogo) + '" alt="Logo"></div>' : logoHTML("hl", "md")) + '</div><div>' + (curLogo ? '<div class="fl2" style="background:#fff;display:flex;align-items:center;justify-content:center;"><img src="' + escH(curLogo) + '" alt="Logo"></div>' : logoHTML("fl2", "sm")) + '</div><div><div class="sprv-label">Vista previa: Login | Header | Footer</div></div></div>';
   h += '<div class="fg"><label class="fl">URL del Logo</label><input type="url" id="sLogoUrl" class="fi" value="' + escH(curLogo) + '" placeholder="https://ejemplo.com/mi-logo.png"></div>';
   h += '<div style="display:flex;gap:10px;"><button class="btn bp" onclick="saveLogo()" style="width:auto;flex:1">💾 Guardar Logo</button>' + (curLogo ? '<button class="btn bd" onclick="removeLogo()" style="width:auto">🗑 Quitar Logo</button>' : '') + '</div>';
   h += '<div style="margin-top:12px;padding:12px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;font-size:12px;color:#92400e;"><strong>💡 Tip:</strong> Puedes subir tu logo a <a href="https://imgur.com/upload" target="_blank" style="color:var(--n);font-weight:600;">Imgur</a> o <a href="https://drive.google.com" target="_blank" style="color:var(--n);font-weight:600;">Google Drive</a> y pegar el enlace directo aquí.<br><br>Para Google Drive usa el formato:<br><code style="font-size:11px;background:#fef3c7;padding:2px 6px;border-radius:4px;">https://drive.google.com/uc?export=view&id=FILE_ID</code></div>';
