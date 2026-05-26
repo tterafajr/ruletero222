@@ -1193,8 +1193,7 @@ async function loadSettings() {
 }
 
 function rSettings() {
-  var sd = S.settingsData || { logoUrl: S.logoUrl };
-  var curLogo = sd.logoUrl || S.logoUrl || "";
+  var curLogo = S.logoUrl || (S.settingsData && S.settingsData.logoUrl) || "";
   var h = '<div class="so"><div class="dh"><h2>⚙️ Configuración</h2><button class="hbn" onclick="togSettings()">✕ Cerrar</button></div><div class="sc">';
 
   h += '<div class="slg"><h4>🎨 Logo de la Aplicación</h4><p>Ingresa la URL de tu logo para reemplazar la letra "R". Se recomienda una imagen cuadrada (PNG con fondo transparente funciona mejor).</p>';
@@ -1254,7 +1253,9 @@ async function saveLogo() {
   var url = document.getElementById("sLogoUrl").value.trim();
   try {
     await db.collection("config").doc("app").set({ logoUrl: url }, { merge: true });
-    S.logoUrl = url; localStorage.setItem("rt_lu", url);
+    S.logoUrl = url;
+    if (S.settingsData) S.settingsData.logoUrl = url;
+    localStorage.setItem("rt_lu", url);
     _audit("update_settings", "Logo actualizado");
     toast("✅ Logo guardado correctamente", "success");
     renderApp();
@@ -1266,7 +1267,9 @@ async function removeLogo() {
   if (!confirm("¿Quitar el logo y volver a la letra R?")) return;
   try {
     await db.collection("config").doc("app").set({ logoUrl: "" }, { merge: true });
-    S.logoUrl = ""; localStorage.setItem("rt_lu", "");
+    S.logoUrl = "";
+    if (S.settingsData) S.settingsData.logoUrl = "";
+    localStorage.setItem("rt_lu", "");
     _audit("update_settings", "Logo eliminado");
     toast("✅ Logo eliminado", "success");
     renderApp();
